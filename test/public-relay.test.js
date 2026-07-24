@@ -3,6 +3,7 @@
 const assert = require("assert");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
+const fs = require("fs");
 const http = require("http");
 const { once } = require("events");
 const path = require("path");
@@ -82,7 +83,8 @@ test("public Relay allows anonymous bounded reads but requires Relay-local beare
     cursorSecret: "public-relay-cursor-secret-must-be-at-least-32-bytes",
     now,
     defaultPageSize: 1,
-    maximumPageSize: 2
+    maximumPageSize: 2,
+    sourceOfferUrl: "https://github.com/vuivahn/fns-v0/archive/0123456789abcdef0123456789abcdef01234567.tar.gz"
   });
   try {
     server.listen(0, "127.0.0.1");
@@ -167,6 +169,16 @@ test("public Relay allows anonymous bounded reads but requires Relay-local beare
 
     const health = await requestJson(baseUrl, "GET", "/healthz");
     assert.strictEqual(health.status, 200);
+    assert.strictEqual(
+      health.headers.link,
+      '<https://github.com/vuivahn/fns-v0/archive/0123456789abcdef0123456789abcdef01234567.tar.gz>; rel="source"'
+    );
+    const sourceOffer = await requestJson(baseUrl, "GET", "/.well-known/fns-source");
+    assert.strictEqual(sourceOffer.status, 200);
+    assert.deepStrictEqual(sourceOffer.body, {
+      license: "AGPL-3.0-or-later",
+      correspondingSource: "https://github.com/vuivahn/fns-v0/archive/0123456789abcdef0123456789abcdef01234567.tar.gz"
+    });
     const ready = await requestJson(baseUrl, "GET", "/readyz");
     assert.strictEqual(ready.status, 200);
     assert.strictEqual(ready.body.readiness.candidate.database, "ok");
@@ -175,6 +187,10 @@ test("public Relay allows anonymous bounded reads but requires Relay-local beare
 
     const malformedPath = await requestJson(baseUrl, "GET", "/v1/objects/%E0%A4%A");
     assert.strictEqual(malformedPath.status, 400);
+    assert.strictEqual(
+      malformedPath.headers.link,
+      '<https://github.com/vuivahn/fns-v0/archive/0123456789abcdef0123456789abcdef01234567.tar.gz>; rel="source"'
+    );
     const overlongUrl = await requestJson(baseUrl, "GET", `/v1/objects/${"a".repeat(9000)}`);
     assert.strictEqual(overlongUrl.status, 413);
     const methodNotAllowed = await requestJson(baseUrl, "PUT", "/v1/publications");
@@ -215,6 +231,8 @@ test("public Relay cursors reject signed payloads with a non-JSON query", () => 
 
 test("public Relay local profile requires isolated storage and secret configuration", () => {
   const directory = temporaryRelayDirectory();
+  const secretDirectory = path.join(directory, "secrets");
+  const invalidParent = path.join(directory, "not-a-directory");
   const environment = {
     FNS_RELAY_CANDIDATES_DB: path.join(directory, "candidates.sqlite"),
     FNS_RELAY_CAPABILITY_DB: path.join(directory, "capabilities.sqlite"),
@@ -226,6 +244,16 @@ test("public Relay local profile requires isolated storage and secret configurat
   };
   let application;
   try {
+    fs.mkdirSync(secretDirectory);
+    fs.writeFileSync(
+      path.join(secretDirectory, "capability-pepper"),
+      Buffer.concat([crypto.randomBytes(32), Buffer.from("\n")])
+    );
+    fs.writeFileSync(
+      path.join(secretDirectory, "cursor-secret"),
+      Buffer.concat([crypto.randomBytes(32), Buffer.from("\n")])
+    );
+    fs.writeFileSync(invalidParent, "not a directory");
     assert.throws(
       () =>
         createLocalReferenceRelayApplication({
@@ -240,11 +268,94 @@ test("public Relay local profile requires isolated storage and secret configurat
         }),
       RelayProtocolError
     );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: {
+            ...environment,
+            FNS_RELAY_CANDIDATES_DB: path.join(invalidParent, "candidates.sqlite")
+          }
+        }),
+      /FNS_RELAY_CANDIDATES_DB parent directory/
+    );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: { ...environment, FNS_RELAY_SOURCE_OFFER_URL: "ftp://example.invalid/source" }
+        }),
+      RelayProtocolError
+    );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: { ...environment, FNS_RELAY_SOURCE_OFFER_URL: "https://github.com/vuivahn/fns-v0/tree/main" }
+        }),
+      RelayProtocolError
+    );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: {
+            ...environment,
+            FNS_RELAY_SOURCE_OFFER_URL:
+              "https://github.com/vuivahn/fns-v0/archive/0123456789abcdef0123456789abcdef01234567.tar.gz"
+          },
+          builtSourceOfferUrl:
+            "https://github.com/vuivahn/fns-v0/archive/abcdef0123456789abcdef0123456789abcdef01.tar.gz"
+        }),
+      /does not match/
+    );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: {
+            ...environment,
+            FNS_RELAY_CAPABILITY_PEPPER_FILE: path.join(secretDirectory, "capability-pepper")
+          }
+        }),
+      /cannot both be set/
+    );
     application = createLocalReferenceRelayApplication({ environment });
     assert.strictEqual(typeof application.server.listen, "function");
     assert.strictEqual(typeof application.relay.readiness, "function");
+    application.close();
+    application = createLocalReferenceRelayApplication({
+      environment: {
+        ...environment,
+        FNS_RELAY_CAPABILITY_PEPPER: undefined,
+        FNS_RELAY_CURSOR_SECRET: undefined,
+        FNS_RELAY_CAPABILITY_PEPPER_FILE: path.join(secretDirectory, "capability-pepper"),
+        FNS_RELAY_CURSOR_SECRET_FILE: path.join(secretDirectory, "cursor-secret")
+      }
+    });
+    assert.strictEqual(typeof application.server.listen, "function");
   } finally {
     if (application) application.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("public Relay rejects candidate and capability databases that resolve to the same file", () => {
+  const directory = temporaryRelayDirectory();
+  const candidateFilename = path.join(directory, "candidates.sqlite");
+  const capabilityFilename = path.join(directory, "capabilities.sqlite");
+  try {
+    fs.writeFileSync(candidateFilename, "");
+    fs.linkSync(candidateFilename, capabilityFilename);
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: {
+            FNS_RELAY_CANDIDATES_DB: candidateFilename,
+            FNS_RELAY_CAPABILITY_DB: capabilityFilename,
+            FNS_RELAY_BLOB_DIR: path.join(directory, "blobs"),
+            FNS_RELAY_CAPABILITY_PEPPER: "local-reference-capability-pepper-32-bytes-minimum",
+            FNS_RELAY_CURSOR_SECRET: "public-relay-cursor-secret-must-be-at-least-32-bytes"
+          }
+        }),
+      /resolve to distinct files/
+    );
+  } finally {
     removeTemporaryRelayDirectory(directory);
   }
 });
@@ -288,17 +399,43 @@ test("public Relay admin CLI exports, verifies, and explicitly restores a portab
     FNS_RELAY_CURSOR_SECRET: "public-relay-cursor-secret-must-be-at-least-32-bytes"
   };
   try {
-    const exported = await runRelayAdmin(environment, ["export", archive]);
+    const initialized = createLocalReferenceRelayApplication({ environment });
+    initialized.close();
+    const dataOnlyEnvironment = {
+      FNS_RELAY_CANDIDATES_DB: environment.FNS_RELAY_CANDIDATES_DB,
+      FNS_RELAY_BLOB_DIR: environment.FNS_RELAY_BLOB_DIR
+    };
+    const exported = await runRelayAdmin(dataOnlyEnvironment, ["export", archive]);
     assert.strictEqual(exported.code, 0, exported.stderr);
     assert.strictEqual(JSON.parse(exported.stdout).command, "export");
-    const validated = await runRelayAdmin(environment, ["restore-validate", archive]);
+    const validated = await runRelayAdmin(dataOnlyEnvironment, ["restore-validate", archive]);
     assert.strictEqual(validated.code, 0, validated.stderr);
-    const rejectedReplacement = await runRelayAdmin(environment, ["restore-replace", archive]);
+    const rejectedReplacement = await runRelayAdmin(dataOnlyEnvironment, ["restore-replace", archive]);
     assert.strictEqual(rejectedReplacement.code, 1);
-    const restored = await runRelayAdmin(environment, ["restore-replace", archive, "--confirm-replace"]);
+    const restored = await runRelayAdmin(dataOnlyEnvironment, ["restore-replace", archive, "--confirm-replace"]);
     assert.strictEqual(restored.code, 0, restored.stderr);
-    const verified = await runRelayAdmin(environment, ["verify"]);
+    const verified = await runRelayAdmin(dataOnlyEnvironment, ["verify"]);
     assert.strictEqual(verified.code, 0, verified.stderr);
+    const expiry = Math.floor(Date.now() / 1000) + 600;
+    const issued = await runRelayAdmin(
+      {
+        FNS_RELAY_CAPABILITY_DB: environment.FNS_RELAY_CAPABILITY_DB,
+        FNS_RELAY_CAPABILITY_PEPPER: environment.FNS_RELAY_CAPABILITY_PEPPER
+      },
+      ["issue-capability", String(expiry), PUBLISH_SCOPE]
+    );
+    assert.strictEqual(issued.code, 0, issued.stderr);
+    const issuedBody = JSON.parse(issued.stdout);
+    assert.match(issuedBody.token, /^fnsr1\./);
+    const revoked = await runRelayAdmin(
+      {
+        FNS_RELAY_CAPABILITY_DB: environment.FNS_RELAY_CAPABILITY_DB,
+        FNS_RELAY_CAPABILITY_PEPPER: environment.FNS_RELAY_CAPABILITY_PEPPER
+      },
+      ["revoke-capability", issuedBody.capability.id]
+    );
+    assert.strictEqual(revoked.code, 0, revoked.stderr);
+    assert.strictEqual(JSON.parse(revoked.stdout).revoked, true);
   } finally {
     removeTemporaryRelayDirectory(directory);
   }

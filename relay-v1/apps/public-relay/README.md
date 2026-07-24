@@ -11,6 +11,11 @@ The application is not a canonical, default, or trusted FNS Relay. Deployments
 must add TLS termination, rate limiting, secrets management, and observability
 at their chosen edge/platform before exposing it publicly.
 
+For the production local-reference image, mounted-volume layout, source-offer
+endpoint, read-only root filesystem, and release smoke, see
+[DEPLOYMENT.md](DEPLOYMENT.md). The public image requires an immutable source
+offer URL and exposes it at `GET /.well-known/fns-source`.
+
 ## Local reference profile
 
 The executable starts only the local reference profile: SQLite candidate data,
@@ -32,7 +37,11 @@ npm.cmd --prefix relay-v1/apps/public-relay run start
 `FNS_RELAY_MAX_RESPONSE_BYTES`, and `FNS_RELAY_MAX_URL_BYTES` are optional.
 The candidate and capability databases must be different files. Treat the two
 secret values as deployment secrets: never commit them or put them in an
-archive.
+archive. A deployment may instead set
+`FNS_RELAY_CAPABILITY_PEPPER_FILE` and `FNS_RELAY_CURSOR_SECRET_FILE` to
+read-only secret files; setting a direct value and its `_FILE` counterpart at
+the same time fails closed. Secret files are read as raw bytes, with one final
+LF (or CRLF) ignored.
 
 `GET /healthz` is process health. `GET /readyz` performs only lightweight
 candidate/blob/capability reachability checks; scheduled admin verification is
@@ -49,6 +58,23 @@ npm.cmd --prefix relay-v1/apps/public-relay run admin -- export C:\relay-backups
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-validate C:\relay-backups\relay.json
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-replace C:\relay-backups\relay.json --confirm-replace
+```
+
+Archive commands need only `FNS_RELAY_CANDIDATES_DB` and
+`FNS_RELAY_BLOB_DIR`, so a backup job receives neither bearer-authentication
+secret. `export`, `verify`, and `restore-validate` open candidate/blob storage
+read-only; `restore-replace` is a maintenance operation and must not run
+against a live Relay writer.
+
+Issue a publication capability through the operator-only CLI, not an HTTP
+endpoint. It needs only `FNS_RELAY_CAPABILITY_DB` and the capability pepper;
+it writes the raw token to stdout once, so capture it only through a secure
+operator channel.
+
+```powershell
+$expires = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+npm.cmd --prefix relay-v1/apps/public-relay run admin -- issue-capability $expires relay:publication:create
+npm.cmd --prefix relay-v1/apps/public-relay run admin -- revoke-capability <capability-id>
 ```
 
 Archives contain immutable candidate data, coverage, blobs, and a digest. They

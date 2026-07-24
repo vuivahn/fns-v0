@@ -52,12 +52,20 @@ function syncDirectory(directory) {
 }
 
 class FileSystemBlobStore {
-  constructor({ directory }) {
+  constructor({ directory, readonly = false }) {
     if (typeof directory !== "string" || directory.length === 0)
       throw new InvalidRequestError("directory must be a non-empty string", { directory });
+    if (typeof readonly !== "boolean") throw new InvalidRequestError("readonly must be a boolean", { readonly });
     this.directory = path.resolve(directory);
+    this.readonly = readonly;
     try {
-      fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+      if (readonly) {
+        const information = fs.statSync(this.directory);
+        if (!information.isDirectory()) throw new StoreAccessError("filesystem blob path is not a directory");
+        fs.accessSync(this.directory, fs.constants.R_OK | fs.constants.X_OK);
+      } else {
+        fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+      }
     } catch (error) {
       throw mapFileError(error, "unable to initialize filesystem blob store");
     }
@@ -88,6 +96,7 @@ class FileSystemBlobStore {
   }
 
   async putIfAbsent(value) {
+    if (this.readonly) throw new StoreAccessError("filesystem blob store is read-only");
     const candidate = normalizeCandidate(value);
     const representation = stableJson(candidate.object);
     const existing = this.#read(candidate.objectId);
@@ -170,7 +179,12 @@ class FileSystemBlobStore {
 
   async readiness() {
     try {
-      fs.accessSync(this.directory, fs.constants.R_OK | fs.constants.W_OK);
+      fs.accessSync(
+        this.directory,
+        this.readonly
+          ? fs.constants.R_OK | fs.constants.X_OK
+          : fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK
+      );
       return { directory: "ok" };
     } catch (error) {
       throw mapFileError(error, "filesystem blob store is not ready");

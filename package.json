@@ -27,6 +27,7 @@
     "lint": "eslint . --max-warnings=0",
     "package:check": "npm pack --dry-run --ignore-scripts",
     "test": "node --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js",
+    "test:container": "node scripts/relay-container-smoke.js",
     "test:relay": "node --unhandled-rejections=strict --test test/relay-reference.test.js test/public-relay.test.js",
     "test:strict": "node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js"
   },

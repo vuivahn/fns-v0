@@ -4,7 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const test = require("node:test");
-const { SQLiteStore, SQLiteStoreAdmin, StoreIntegrityError } = require("../src");
+const { SQLiteStore, SQLiteStoreAdmin, StoreAccessError, StoreIntegrityError } = require("../src");
 const relayContract = require("../relay-v1/packages/relay-contract/src");
 const { runRelayStorageConformance } = require("../relay-v1/packages/relay-contract/src/conformance");
 const {
@@ -12,7 +12,12 @@ const {
   RelayAuthenticationError,
   RelayProtocolError
 } = require("../relay-v1/packages/relay-contract/src/errors");
-const { LocalPublicationPolicy, PUBLISH_SCOPE, SQLiteCandidateStore } = require("../relay-v1/packages/relay-local/src");
+const {
+  FileSystemBlobStore,
+  LocalPublicationPolicy,
+  PUBLISH_SCOPE,
+  SQLiteCandidateStore
+} = require("../relay-v1/packages/relay-local/src");
 const { binding, bindingA, bindingB, context, release, releaseObject } = require("./store-conformance");
 const {
   createLocalReferenceRelay,
@@ -198,6 +203,23 @@ test("SQLite Relay page queries fetch only the requested page plus its cursor wi
     });
     assert.strictEqual(second.objects.length, 1);
     assert.strictEqual(second.hasMore, false);
+  } finally {
+    reference.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("filesystem blob adapter supports a read-only archive/export profile", async () => {
+  const directory = temporaryRelayDirectory();
+  const reference = createLocalReferenceRelay(directory);
+  let readonly;
+  try {
+    await reference.blobStore.putIfAbsent({ objectId: bindingA, object: binding() });
+    readonly = new FileSystemBlobStore({ directory: `${directory}/blobs`, readonly: true });
+    assert.deepStrictEqual(await readonly.get(bindingA), { objectId: bindingA, object: binding() });
+    assert.deepStrictEqual(await readonly.exportBlobs([bindingA]), [{ objectId: bindingA, object: binding() }]);
+    assert.deepStrictEqual(await readonly.readiness(), { directory: "ok" });
+    await assert.rejects(() => readonly.putIfAbsent({ objectId: bindingB, object: binding() }), StoreAccessError);
   } finally {
     reference.close();
     removeTemporaryRelayDirectory(directory);

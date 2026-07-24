@@ -107,6 +107,30 @@ function isKnownV1Route(pathname) {
   );
 }
 
+function normalizeSourceOfferUrl(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string")
+    throw new RelayProtocolError("sourceOfferUrl must be an immutable HTTPS source archive URL or null");
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new RelayProtocolError("sourceOfferUrl must be an immutable HTTPS source archive URL or null");
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    parsed.hash.length > 0 ||
+    parsed.search.length > 0 ||
+    !/\/archive\/[0-9a-f]{40}\.tar\.gz$/.test(parsed.pathname)
+  )
+    throw new RelayProtocolError(
+      "sourceOfferUrl must be an immutable HTTPS source archive URL without credentials, query, or fragment"
+    );
+  return parsed.toString();
+}
+
 function createPublicRelayServer({
   relay,
   cursorSecret,
@@ -115,7 +139,8 @@ function createPublicRelayServer({
   maximumPageSize = 1000,
   maximumRequestBytes = 262144,
   maximumResponseBytes = 1048576,
-  maximumUrlBytes = 8192
+  maximumUrlBytes = 8192,
+  sourceOfferUrl = null
 }) {
   requireRelay(relay);
   if (!Number.isSafeInteger(defaultPageSize) || defaultPageSize < 1 || defaultPageSize > maximumPageSize)
@@ -129,15 +154,30 @@ function createPublicRelayServer({
   if (!Number.isSafeInteger(maximumUrlBytes) || maximumUrlBytes < 1)
     throw new RelayProtocolError("maximumUrlBytes is invalid", { maximumUrlBytes });
   const cursorCodec = new CursorCodec({ secret: cursorSecret, now });
+  const normalizedSourceOfferUrl = normalizeSourceOfferUrl(sourceOfferUrl);
+  const sourceOfferHeaders =
+    normalizedSourceOfferUrl === null ? {} : { link: `<${normalizedSourceOfferUrl}>; rel="source"` };
 
   return http.createServer(async (request, response) => {
     try {
       if (typeof request.url !== "string" || Buffer.byteLength(request.url, "utf8") > maximumUrlBytes)
         throw new RelayLimitError("request URL exceeds the configured limit", { maximumUrlBytes });
       const url = new URL(request.url, "http://relay.invalid");
-      const send = (status, body, headers = {}) => writeJson(response, status, body, headers, maximumResponseBytes);
+      const send = (status, body, headers = {}) =>
+        writeJson(response, status, body, { ...sourceOfferHeaders, ...headers }, maximumResponseBytes);
       if (request.method === "GET" && url.pathname === "/healthz") {
         send(200, { status: "ok", relay: "fns.relay.v1" });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/.well-known/fns-source") {
+        if (normalizedSourceOfferUrl === null) {
+          send(404, { error: { code: "E_RELAY_NOT_FOUND", message: "source offer was not configured" } });
+          return;
+        }
+        send(200, {
+          license: "AGPL-3.0-or-later",
+          correspondingSource: normalizedSourceOfferUrl
+        });
         return;
       }
       if (request.method === "GET" && url.pathname === "/readyz") {
@@ -219,9 +259,11 @@ function createPublicRelayServer({
       send(404, { error: { code: "E_RELAY_NOT_FOUND", message: "route was not found" } });
     } catch (error) {
       const publicResult = publicError(error);
-      writeJson(response, publicResult.status, publicResult.body);
+      // A limit response must still be deliverable even when the configured
+      // representation budget is smaller than the structured error itself.
+      writeJson(response, publicResult.status, publicResult.body, sourceOfferHeaders);
     }
   });
 }
 
-module.exports = { createPublicRelayServer };
+module.exports = { createPublicRelayServer, normalizeSourceOfferUrl };
