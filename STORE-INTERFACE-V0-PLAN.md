@@ -4,7 +4,7 @@
 
 Store Interface v0는 동결된 FNS Core v0와 저장·전송 환경 사이의 비동기 read-only 경계다. Store는 검증되지 않은 후보 객체와 관측 정보를 제공할 뿐, 객체 유효성·release 상태·capability·fork·conflict·local trust를 판단하지 않는다.
 
-이 문서는 `MemoryStore` 참조 구현과 Core를 변경하지 않는 async adapter까지 구현된 계약을 기록한다. Relay, SQLite, DirectoryStore는 이 계약을 구현하는 후속 adapter다.
+이 문서는 `MemoryStore`, `SQLiteStore`, 그리고 Core를 변경하지 않는 async adapter가 구현하는 계약을 기록한다. SQLiteStore의 snapshot·backup·무결성 관리 표면은 별도 `SQLiteStoreAdmin`에 있으며, Relay와 DirectoryStore는 이 계약을 구현할 후속 adapter다.
 
 ## 표준 타입
 
@@ -30,10 +30,10 @@ Store Interface v0는 동결된 FNS Core v0와 저장·전송 환경 사이의 �
 
 ```js
 class FnsStore {
-  async getObject(objectId) {}                 // Candidate | null
-  async findAliasBindings(context, alias) {}   // DiscoveryEnvelope
-  async findAliasReleases(bindingIds) {}       // DiscoveryEnvelope
-  async findCommuneDocuments(context) {}       // DiscoveryEnvelope
+  async getObject(objectId) {} // Candidate | null
+  async findAliasBindings(context, alias) {} // DiscoveryEnvelope
+  async findAliasReleases(bindingIds) {} // DiscoveryEnvelope
+  async findCommuneDocuments(context) {} // DiscoveryEnvelope
 }
 ```
 

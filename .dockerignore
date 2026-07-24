@@ -1,0 +1,17 @@
+# Source-control and local-agent state
+.git
+.github
+.agents
+.codex
+
+# Dependencies and generated artifacts
+node_modules
+coverage
+.nyc_output
+*.tgz
+npm-debug.log*
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example

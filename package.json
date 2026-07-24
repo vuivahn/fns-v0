@@ -18,14 +18,21 @@
     "src/"
   ],
   "scripts": {
-    "check": "node --check src/index.js && node --check src/adapter.js && node --check src/errors.js && node --check src/fns-store.js && node --check src/memory-store.js && node --check test/store-interface.test.js",
-    "test": "node test/store-interface.test.js",
-    "test:strict": "node --unhandled-rejections=strict test/store-interface.test.js"
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "check": "npm run lint && npm run format:check",
+    "coverage": "c8 --all --include=src/**/*.js --check-coverage --lines 90 --statements 90 --functions 85 --branches 75 node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "package:check": "npm pack --dry-run --ignore-scripts",
+    "test": "node --test test/store-interface.test.js test/sqlite-store.test.js",
+    "test:strict": "node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "better-sqlite3": "12.4.1",
     "fns-v0-validator": "0.1.0"
   },
   "repository": {
@@ -35,5 +42,11 @@
   "bugs": {
     "url": "https://github.com/vuivahn/fns-v0/issues"
   },
-  "homepage": "https://github.com/vuivahn/fns-v0#readme"
+  "homepage": "https://github.com/vuivahn/fns-v0#readme",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "c8": "12.0.0",
+    "eslint": "9.39.5",
+    "prettier": "3.9.5"
+  }
 }
