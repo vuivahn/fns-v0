@@ -1,0 +1,305 @@
+"use strict";
+
+const assert = require("assert");
+const { spawn } = require("child_process");
+const crypto = require("crypto");
+const http = require("http");
+const { once } = require("events");
+const path = require("path");
+const test = require("node:test");
+const { URL } = require("url");
+const { CursorCodec } = require("../relay-v1/apps/public-relay/src/cursor-codec");
+const { createLocalReferenceRelayApplication } = require("../relay-v1/apps/public-relay/src/local-reference-app");
+const { createPublicRelayServer } = require("../relay-v1/apps/public-relay/src/server");
+const { RelayProtocolError } = require("../relay-v1/packages/relay-contract/src/errors");
+const { PUBLISH_SCOPE } = require("../relay-v1/packages/relay-local/src");
+const { binding, bindingA, bindingB, context, release, releaseObject } = require("./store-conformance");
+const {
+  createLocalReferenceRelay,
+  removeTemporaryRelayDirectory,
+  temporaryRelayDirectory
+} = require("./relay-support");
+
+function requestJson(baseUrl, method, pathname, { headers = {}, body = null } = {}) {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      url,
+      {
+        method,
+        headers: body === null ? headers : { "content-type": "application/json", ...headers }
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          try {
+            resolve({
+              status: response.statusCode,
+              headers: response.headers,
+              body: JSON.parse(Buffer.concat(chunks).toString("utf8"))
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.on("error", reject);
+    if (body !== null) request.end(JSON.stringify(body));
+    else request.end();
+  });
+}
+
+function runRelayAdmin(environment, arguments_) {
+  const script = path.join(__dirname, "..", "relay-v1", "apps", "public-relay", "bin", "admin.js");
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...arguments_], {
+      cwd: path.join(__dirname, ".."),
+      env: { ...process.env, ...environment, NODE_V8_COVERAGE: "" }
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
+    });
+  });
+}
+
+test("public Relay allows anonymous bounded reads but requires Relay-local bearer publication", async () => {
+  const directory = temporaryRelayDirectory();
+  const now = () => Date.UTC(2026, 0, 1, 0, 0, 0);
+  const reference = createLocalReferenceRelay(directory, { now });
+  const capability = reference.capabilityStore.create({
+    scopes: [PUBLISH_SCOPE],
+    expiresAt: Math.floor(now() / 1000) + 600
+  });
+  const server = createPublicRelayServer({
+    relay: reference.relay,
+    cursorSecret: "public-relay-cursor-secret-must-be-at-least-32-bytes",
+    now,
+    defaultPageSize: 1,
+    maximumPageSize: 2
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const unauthorized = await requestJson(baseUrl, "POST", "/v1/publications", {
+      body: { objectId: bindingA, object: binding() }
+    });
+    assert.strictEqual(unauthorized.status, 401);
+    assert.strictEqual(unauthorized.body.error.code, "E_RELAY_AUTHENTICATION");
+
+    for (const objectId of [bindingA, bindingB]) {
+      const published = await requestJson(baseUrl, "POST", "/v1/publications", {
+        headers: { authorization: `Bearer ${capability.token}` },
+        body: { objectId, object: binding() }
+      });
+      assert.strictEqual(published.status, 201);
+    }
+    for (const candidate of [
+      { objectId: release, object: releaseObject },
+      { objectId: context, object: { payload: { type: "fns.commune.genesis" } } }
+    ]) {
+      const published = await requestJson(baseUrl, "POST", "/v1/publications", {
+        headers: { authorization: `Bearer ${capability.token}` },
+        body: candidate
+      });
+      assert.strictEqual(published.status, 201);
+    }
+
+    const object = await requestJson(baseUrl, "GET", `/v1/objects/${encodeURIComponent(bindingA)}`);
+    assert.strictEqual(object.status, 200);
+    assert.strictEqual(object.body.objectId, bindingA);
+    assert.strictEqual(object.headers["x-content-type-options"], "nosniff");
+
+    const firstPage = await requestJson(
+      baseUrl,
+      "GET",
+      `/v1/discovery/alias-bindings?context=${encodeURIComponent(context)}&alias=alice&limit=1`
+    );
+    assert.strictEqual(firstPage.status, 200);
+    assert.strictEqual(firstPage.body.complete, false);
+    assert.strictEqual(firstPage.body.page.complete, false);
+    assert.strictEqual(firstPage.body.objects.length, 1);
+    const secondPage = await requestJson(
+      baseUrl,
+      "GET",
+      `/v1/discovery/alias-bindings?context=${encodeURIComponent(context)}&alias=alice&limit=1&cursor=${encodeURIComponent(firstPage.body.page.nextCursor)}`
+    );
+    assert.strictEqual(secondPage.status, 200);
+    assert.strictEqual(secondPage.body.page.complete, true);
+    assert.strictEqual(secondPage.body.objects.length, 1);
+
+    const releases = await requestJson(
+      baseUrl,
+      "GET",
+      `/v1/discovery/alias-releases?binding=${encodeURIComponent(bindingA)}`
+    );
+    assert.strictEqual(releases.status, 200);
+    assert.deepStrictEqual(
+      releases.body.objects.map((candidate) => candidate.objectId),
+      [release]
+    );
+    const communeDocuments = await requestJson(
+      baseUrl,
+      "GET",
+      `/v1/discovery/commune-documents?context=${encodeURIComponent(context)}`
+    );
+    assert.strictEqual(communeDocuments.status, 200);
+    assert.deepStrictEqual(
+      communeDocuments.body.objects.map((candidate) => candidate.objectId),
+      [context]
+    );
+
+    const mismatchedCursor = await requestJson(
+      baseUrl,
+      "GET",
+      `/v1/discovery/alias-bindings?context=${encodeURIComponent(context)}&alias=other&cursor=${encodeURIComponent(firstPage.body.page.nextCursor)}`
+    );
+    assert.strictEqual(mismatchedCursor.status, 400);
+
+    const health = await requestJson(baseUrl, "GET", "/healthz");
+    assert.strictEqual(health.status, 200);
+    const ready = await requestJson(baseUrl, "GET", "/readyz");
+    assert.strictEqual(ready.status, 200);
+    assert.strictEqual(ready.body.readiness.candidate.database, "ok");
+    assert.strictEqual(ready.body.readiness.blobs.directory, "ok");
+    assert.strictEqual(ready.body.readiness.capabilities.database, "ok");
+
+    const malformedPath = await requestJson(baseUrl, "GET", "/v1/objects/%E0%A4%A");
+    assert.strictEqual(malformedPath.status, 400);
+    const overlongUrl = await requestJson(baseUrl, "GET", `/v1/objects/${"a".repeat(9000)}`);
+    assert.strictEqual(overlongUrl.status, 413);
+    const methodNotAllowed = await requestJson(baseUrl, "PUT", "/v1/publications");
+    assert.strictEqual(methodNotAllowed.status, 405);
+    const unknownV1Route = await requestJson(baseUrl, "GET", "/v1/does-not-exist");
+    assert.strictEqual(unknownV1Route.status, 404);
+    const unknownRoute = await requestJson(baseUrl, "GET", "/not-a-relay-route");
+    assert.strictEqual(unknownRoute.status, 404);
+  } finally {
+    server.close();
+    await once(server, "close");
+    reference.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("public Relay cursors reject signed payloads with a non-JSON query", () => {
+  const secret = "public-relay-cursor-secret-must-be-at-least-32-bytes";
+  const codec = new CursorCodec({ secret, now: () => Date.UTC(2026, 0, 1, 0, 0, 0) });
+  const payload = {
+    version: 1,
+    route: "/v1/discovery/alias-bindings",
+    query: undefined,
+    lastObjectId: bindingA,
+    expiresAt: Math.floor(Date.UTC(2026, 0, 1, 0, 0, 0) / 1000) + 60
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  assert.throws(
+    () =>
+      codec.parse(`fnsrc1.${encodedPayload}.${signature}`, {
+        route: "/v1/discovery/alias-bindings",
+        query: { context: context, alias: "alice" }
+      }),
+    RelayProtocolError
+  );
+});
+
+test("public Relay local profile requires isolated storage and secret configuration", () => {
+  const directory = temporaryRelayDirectory();
+  const environment = {
+    FNS_RELAY_CANDIDATES_DB: path.join(directory, "candidates.sqlite"),
+    FNS_RELAY_CAPABILITY_DB: path.join(directory, "capabilities.sqlite"),
+    FNS_RELAY_BLOB_DIR: path.join(directory, "blobs"),
+    FNS_RELAY_CAPABILITY_PEPPER: "local-reference-capability-pepper-32-bytes-minimum",
+    FNS_RELAY_CURSOR_SECRET: "public-relay-cursor-secret-must-be-at-least-32-bytes",
+    FNS_RELAY_DEFAULT_PAGE_SIZE: "2",
+    FNS_RELAY_MAX_PAGE_SIZE: "3"
+  };
+  let application;
+  try {
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: { ...environment, FNS_RELAY_CAPABILITY_DB: environment.FNS_RELAY_CANDIDATES_DB }
+        }),
+      RelayProtocolError
+    );
+    assert.throws(
+      () =>
+        createLocalReferenceRelayApplication({
+          environment: { ...environment, FNS_RELAY_DEFAULT_PAGE_SIZE: "4" }
+        }),
+      RelayProtocolError
+    );
+    application = createLocalReferenceRelayApplication({ environment });
+    assert.strictEqual(typeof application.server.listen, "function");
+    assert.strictEqual(typeof application.relay.readiness, "function");
+  } finally {
+    if (application) application.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("public Relay returns 413 for bounded request and response payloads", async () => {
+  const directory = temporaryRelayDirectory();
+  const reference = createLocalReferenceRelay(directory);
+  const server = createPublicRelayServer({
+    relay: reference.relay,
+    cursorSecret: "public-relay-cursor-secret-must-be-at-least-32-bytes",
+    maximumRequestBytes: 8,
+    maximumResponseBytes: 8
+  });
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const requestLimit = await requestJson(baseUrl, "POST", "/v1/publications", {
+      body: { objectId: bindingA, object: binding() }
+    });
+    assert.strictEqual(requestLimit.status, 413);
+    const responseLimit = await requestJson(baseUrl, "GET", "/healthz");
+    assert.strictEqual(responseLimit.status, 413);
+  } finally {
+    server.close();
+    await once(server, "close");
+    reference.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("public Relay admin CLI exports, verifies, and explicitly restores a portable archive", async () => {
+  const directory = temporaryRelayDirectory();
+  const archive = path.join(directory, "relay-archive.json");
+  const environment = {
+    FNS_RELAY_CANDIDATES_DB: path.join(directory, "candidates.sqlite"),
+    FNS_RELAY_CAPABILITY_DB: path.join(directory, "capabilities.sqlite"),
+    FNS_RELAY_BLOB_DIR: path.join(directory, "blobs"),
+    FNS_RELAY_CAPABILITY_PEPPER: "local-reference-capability-pepper-32-bytes-minimum",
+    FNS_RELAY_CURSOR_SECRET: "public-relay-cursor-secret-must-be-at-least-32-bytes"
+  };
+  try {
+    const exported = await runRelayAdmin(environment, ["export", archive]);
+    assert.strictEqual(exported.code, 0, exported.stderr);
+    assert.strictEqual(JSON.parse(exported.stdout).command, "export");
+    const validated = await runRelayAdmin(environment, ["restore-validate", archive]);
+    assert.strictEqual(validated.code, 0, validated.stderr);
+    const rejectedReplacement = await runRelayAdmin(environment, ["restore-replace", archive]);
+    assert.strictEqual(rejectedReplacement.code, 1);
+    const restored = await runRelayAdmin(environment, ["restore-replace", archive, "--confirm-replace"]);
+    assert.strictEqual(restored.code, 0, restored.stderr);
+    const verified = await runRelayAdmin(environment, ["verify"]);
+    assert.strictEqual(verified.code, 0, verified.stderr);
+  } finally {
+    removeTemporaryRelayDirectory(directory);
+  }
+});

@@ -22,6 +22,7 @@ const {
 
 const SCHEMA_VERSION = 1;
 const RELEASE_LOOKUP_CHUNK_SIZE = 900;
+const RELAY_PAGE_MAXIMUM = 10000;
 const states = new WeakMap();
 
 const schema = `
@@ -379,6 +380,35 @@ function readComplete(state, metadata, method, scope) {
   return coverage.complete === 1 && coverage.revision === metadata.dataRevision;
 }
 
+function parseCoverageRow(row, metadata) {
+  if (!row || !METHOD_NAMES.has(row.method))
+    throw new StoreIntegrityError("SQLite store has an unknown coverage method");
+  if (typeof row.scope_json !== "string")
+    throw new StoreIntegrityError("SQLite store has an invalid coverage representation", { method: row.method });
+  let scope;
+  try {
+    scope = JSON.parse(row.scope_json);
+  } catch {
+    throw new StoreIntegrityError("SQLite store has malformed coverage JSON", { method: row.method });
+  }
+  let normalizedScope;
+  try {
+    normalizedScope = normalizeScope(row.method, scope);
+  } catch {
+    throw new StoreIntegrityError("SQLite store has invalid coverage scope", { method: row.method });
+  }
+  if (stableJson(normalizedScope) !== row.scope_json)
+    throw new StoreIntegrityError("SQLite store has non-canonical coverage JSON", { method: row.method });
+  if (
+    (row.complete !== 0 && row.complete !== 1) ||
+    !Number.isSafeInteger(row.revision) ||
+    row.revision < 0 ||
+    row.revision > metadata.dataRevision
+  )
+    throw new StoreIntegrityError("SQLite store has invalid coverage metadata", { method: row.method });
+  return { method: row.method, scope: normalizedScope, complete: row.complete === 1, revision: row.revision };
+}
+
 function envelope(metadata, method, scope, objects, complete) {
   const warnings = complete
     ? []
@@ -390,6 +420,129 @@ function envelope(metadata, method, scope, objects, complete) {
     provenance: [{ source: metadata.source, snapshot: metadata.snapshot, scope: cloneJson(scope), complete }],
     warnings: warnings.sort(byDiagnostic)
   };
+}
+
+function normalizeRelayPage(page) {
+  assertOptionsObject(page, "Relay page options");
+  const { afterObjectId = null, limit } = page;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > RELAY_PAGE_MAXIMUM)
+    throw new InvalidRequestError("Relay page limit is invalid", { limit, maximum: RELAY_PAGE_MAXIMUM });
+  if (afterObjectId !== null) requireObjectId(afterObjectId, "afterObjectId");
+  return { afterObjectId, limit };
+}
+
+function relayPageEnvelope(metadata, method, scope, rows, complete, limit) {
+  const hasMore = rows.length > limit;
+  const objects = rows.slice(0, limit).map(parseStoredEntry);
+  return { ...envelope(metadata, method, scope, objects, complete), hasMore };
+}
+
+function findAliasBindingsPage(store, context, alias, page) {
+  const scope = normalizeScope("bindings", { context, alias });
+  const { afterObjectId, limit } = normalizeRelayPage(page);
+  const state = stateFor(store);
+  return withDatabaseError("unable to page SQLite alias bindings", () =>
+    state.db.transaction(() => {
+      const metadata = readMetadata(state.db);
+      const afterClause = afterObjectId === null ? "" : " AND object_id COLLATE BINARY > ?";
+      const parameters =
+        afterObjectId === null
+          ? [scope.context, scope.alias, limit + 1]
+          : [scope.context, scope.alias, afterObjectId, limit + 1];
+      const rows = state.db
+        .prepare(
+          `SELECT * FROM fns_store_objects
+            WHERE payload_type = 'fns.alias.bind' AND bind_context = ? AND bind_alias = ?${afterClause}
+            ORDER BY object_id COLLATE BINARY
+            LIMIT ?`
+        )
+        .all(...parameters);
+      return relayPageEnvelope(
+        metadata,
+        "bindings",
+        scope,
+        rows,
+        readComplete(state, metadata, "bindings", scope),
+        limit
+      );
+    })()
+  );
+}
+
+function findAliasReleasesPage(store, bindingIds, page) {
+  const scope = normalizeScope("releases", { bindingIds });
+  const { afterObjectId, limit } = normalizeRelayPage(page);
+  if (scope.bindingIds.length > RELEASE_LOOKUP_CHUNK_SIZE)
+    throw new InvalidRequestError("Relay page release lookup has too many binding IDs", {
+      maximum: RELEASE_LOOKUP_CHUNK_SIZE
+    });
+  const state = stateFor(store);
+  return withDatabaseError("unable to page SQLite alias releases", () =>
+    state.db.transaction(() => {
+      const metadata = readMetadata(state.db);
+      if (scope.bindingIds.length === 0)
+        return relayPageEnvelope(
+          metadata,
+          "releases",
+          scope,
+          [],
+          readComplete(state, metadata, "releases", scope),
+          limit
+        );
+      const placeholders = scope.bindingIds.map(() => "?").join(", ");
+      const afterClause = afterObjectId === null ? "" : " AND object_id COLLATE BINARY > ?";
+      const parameters =
+        afterObjectId === null ? [...scope.bindingIds, limit + 1] : [...scope.bindingIds, afterObjectId, limit + 1];
+      const rows = state.db
+        .prepare(
+          `SELECT * FROM fns_store_objects
+            WHERE payload_type = 'fns.alias.release' AND release_binding IN (${placeholders})${afterClause}
+            ORDER BY object_id COLLATE BINARY
+            LIMIT ?`
+        )
+        .all(...parameters);
+      return relayPageEnvelope(
+        metadata,
+        "releases",
+        scope,
+        rows,
+        readComplete(state, metadata, "releases", scope),
+        limit
+      );
+    })()
+  );
+}
+
+function findCommuneDocumentsPage(store, context, page) {
+  const scope = normalizeScope("communeDocuments", { context });
+  const { afterObjectId, limit } = normalizeRelayPage(page);
+  const state = stateFor(store);
+  return withDatabaseError("unable to page SQLite commune documents", () =>
+    state.db.transaction(() => {
+      const metadata = readMetadata(state.db);
+      const afterClause = afterObjectId === null ? "" : " AND object_id COLLATE BINARY > ?";
+      const parameters =
+        afterObjectId === null
+          ? [scope.context, scope.context, limit + 1]
+          : [scope.context, scope.context, afterObjectId, limit + 1];
+      const rows = state.db
+        .prepare(
+          `SELECT * FROM fns_store_objects
+            WHERE (object_id = ? OR (payload_type = 'fns.commune.update' AND commune_context = ?))${afterClause}
+            ORDER BY object_id COLLATE BINARY
+            LIMIT ?`
+        )
+        .all(...parameters);
+      return relayPageEnvelope(
+        metadata,
+        "communeDocuments",
+        scope,
+        rows,
+        readComplete(state, metadata, "communeDocuments", scope),
+        limit
+      );
+    })()
+  );
 }
 
 function requireWritable(state) {
@@ -528,35 +681,38 @@ function verifyIntegrity(store) {
       parseStoredEntry(row);
     for (const row of state.db
       .prepare("SELECT method, scope_json, complete, revision FROM fns_store_coverage")
-      .iterate()) {
-      if (!METHOD_NAMES.has(row.method)) throw new StoreIntegrityError("SQLite store has an unknown coverage method");
-      if (typeof row.scope_json !== "string")
-        throw new StoreIntegrityError("SQLite store has an invalid coverage representation", { method: row.method });
-      let scope;
-      try {
-        scope = JSON.parse(row.scope_json);
-      } catch {
-        throw new StoreIntegrityError("SQLite store has malformed coverage JSON", { method: row.method });
-      }
-      let normalizedScope;
-      try {
-        normalizedScope = normalizeScope(row.method, scope);
-      } catch {
-        throw new StoreIntegrityError("SQLite store has invalid coverage scope", { method: row.method });
-      }
-      if (stableJson(normalizedScope) !== row.scope_json)
-        throw new StoreIntegrityError("SQLite store has non-canonical coverage JSON", { method: row.method });
-      if (
-        (row.complete !== 0 && row.complete !== 1) ||
-        !Number.isSafeInteger(row.revision) ||
-        row.revision < 0 ||
-        row.revision > metadata.dataRevision
-      )
-        throw new StoreIntegrityError("SQLite store has invalid coverage metadata", { method: row.method });
-    }
+      .iterate())
+      parseCoverageRow(row, metadata);
     const objectCount = state.db.prepare("SELECT COUNT(*) AS count FROM fns_store_objects").get().count;
     return { schemaVersion: SCHEMA_VERSION, dataRevision: metadata.dataRevision, objectCount };
   });
+}
+
+function exportSnapshot(store) {
+  const state = stateFor(store);
+  return withDatabaseError("unable to export SQLite snapshot", () =>
+    state.db.transaction(() => {
+      const metadata = readMetadata(state.db);
+      const entries = state.db
+        .prepare("SELECT * FROM fns_store_objects ORDER BY object_id COLLATE BINARY")
+        .all()
+        .map(parseStoredEntry);
+      const coverage = state.db
+        .prepare("SELECT method, scope_json, complete, revision FROM fns_store_coverage ORDER BY method, scope_json")
+        .all()
+        .map((row) => parseCoverageRow(row, metadata))
+        .filter((entry) => entry.revision === metadata.dataRevision)
+        .map(({ method, scope, complete }) => ({ method, scope, complete }));
+      return {
+        version: "fns.store-export.v1",
+        source: metadata.source,
+        snapshot: metadata.snapshot,
+        dataRevision: metadata.dataRevision,
+        entries,
+        coverage
+      };
+    })()
+  );
 }
 
 /**
@@ -579,6 +735,7 @@ class SQLiteStore extends FnsStore {
       if (normalized.readonly) ensureReadonlySchema(db);
       else {
         db.pragma("journal_mode = WAL");
+        db.pragma("synchronous = FULL");
         migrate(db, normalized);
       }
       states.set(this, { db, readonly: normalized.readonly, closed: false });
@@ -702,6 +859,22 @@ class SQLiteStoreAdmin {
 
   verifyIntegrity() {
     return verifyIntegrity(this.store);
+  }
+
+  exportSnapshot() {
+    return exportSnapshot(this.store);
+  }
+
+  findAliasBindingsPage(context, alias, page) {
+    return findAliasBindingsPage(this.store, context, alias, page);
+  }
+
+  findAliasReleasesPage(bindingIds, page) {
+    return findAliasReleasesPage(this.store, bindingIds, page);
+  }
+
+  findCommuneDocumentsPage(context, page) {
+    return findCommuneDocumentsPage(this.store, context, page);
   }
 }
 

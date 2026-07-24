@@ -1,32 +1,61 @@
-# Infrastructure Roadmap
+# 인프라 로드맵
 
-이 문서는 Store Interface v0를 안전하게 완성하고 Relay/운영화로 확장하기 위한 현재 상태와 다음 의사결정을 기록합니다.
+이 문서는 FNS Store v0와 분리된 Relay v1 기반을 완성하기 위한 현재 상태와
+다음 의사결정을 기록합니다. Relay는 선택적 discovery/publication 경로이며,
+그 장애는 FNS 전체 장애가 아닙니다.
 
-| 단계             | 상태      | 완료한 내용                                                                                        | 다음 완료 기준                                                |
-| ---------------- | --------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| 1. 기준선 보존   | 완료      | Git 원격 연결, 초기 소스·테스트 추적, 줄바꿈·ignore 정책, README                                   | 라이선스 선택 후 공개/배포 정책 확정                          |
-| 2. 품질 게이트   | 완료      | ESLint, Prettier, c8 coverage, production audit, package dry-run, Node 20/22/24 CI, Dependabot     | PR에서 CI가 계속 통과하고 의존성 경고를 정기 처리             |
-| 3. 어댑터 적합성 | 완료      | MemoryStore와 SQLiteStore가 공유 read conformance fixture를 통과                                   | 후속 DirectoryStore/외부 Store도 같은 runner에 연결           |
-| 4. 영속 Store    | 완료      | SQLite schema v1, 파생 인덱스, scoped completeness, migration, WAL, backup/restore, integrity 검증 | 실제 운영 데이터의 import/backup 주기와 복구 훈련 합의        |
-| 5. Relay         | 준비됨    | v0 밖으로 분리한 Relay RFC와 안전 제어 목록                                                        | 승인된 Relay v1 wire spec과 접근 정책으로 별도 서비스 구현    |
-| 6. 운영화        | 부분 준비 | CI 컨테이너, dependency update, 운영·복구 문서                                                     | 클라우드/IaC, TLS, secrets, 관측성, SLO, 알림, 복구 훈련 구현 |
+## 현재 상태
 
-## 다음으로 결정할 항목
+| 단계                      | 상태               | 완료된 기준                                                                                       | 남은 종료 조건                                                              |
+| ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1. 기준선·라이선스        | 완료               | Git 기준선, MPL/AGPL/CC0 경계, 전문과 패키지 메타데이터                                           | 릴리스 시 각 독립 배포물에 동일한 고지 포함                                 |
+| 2. 품질 게이트            | 완료               | Node 20/22/24 CI, lint, format, strict test, coverage, audit, package dry-run                     | PR마다 계속 통과하고 취약점 경고를 정기 처리                                |
+| 3. 어댑터 적합성          | 로컬 완료          | Relay contract/conformance, immutable conflict, blob conflict, bounded page 검증                  | D1/R2·PostgreSQL/S3 어댑터도 동일 runner 통과                               |
+| 4. 영속 reference backend | 완료               | SQLite migration/WAL/integrity/physical backup/logical export, filesystem blob durability         | 실데이터 restore drill을 정기 실행                                          |
+| 5. Relay v1               | 로컬 완료          | anonymous read, capability-gated publication, cursor, bounded SQL page, archive, health/readiness | cloud adapter, edge TLS/rate limit, 실제 공개 배포 검증                     |
+| 6. 운영화                 | 문서·로컬 CLI 완료 | runbook, SLO/alert 기준, backend transition gate, archive admin CLI                               | scheduler/IaC/secrets/metrics/alerts/off-provider copy를 대상 플랫폼에 구현 |
 
-실제 Relay나 공개 운영은 다음 선택 없이는 안전하게 가정할 수 없습니다.
+## 확정된 원칙
 
-1. 라이선스와 공개 범위: private 유지, 소스 공개, npm 배포 여부와 소유자/기여 정책
-2. Relay 접근 정책: 공개 read-only, API token, OIDC, mTLS 중 선택 및 tenant 모델
-3. 배포 환경: 클라우드 계정·리전·도메인·TLS 종료 지점·예산·가용성 목표
-4. 데이터 운영: 단일 노드 SQLite 지속 여부, RPO/RTO, backup 보존·암호화, 운영자 접근 통제
-5. Relay wire contract: URL/media type, pagination/cursor, response·timeout 한도, structured error, cache semantics
-6. 관측성과 대응: 로그 redaction, metrics/traces, health/readiness, SLO, 알림, 장애·복구 runbook
+- Core/Client/Standalone/Gateway/Builder와 Relay contract/adapters/conformance는
+  MPL-2.0이다.
+- 운영용 public Relay application과 운영 구현은 AGPL-3.0-or-later이다.
+- specs/schemas/vectors는 CC0-1.0이다.
+- Relay public read는 anonymous이고, publication admission은 Relay-local
+  policy다. 초기 인증은 scoped, expiring opaque capability bearer token이다.
+- FNS identity/trust/authority는 Relay 인증·정책과 완전히 분리한다.
+- SQLite는 영구적인 reference backend이고, PostgreSQL은 scale 대안이다.
+  serverless는 선택 profile이며 자동으로 우월하거나 기본값이 되지 않는다.
+- 어떤 Relay도 canonical/default/trusted Relay가 아니다.
+- backend-neutral export/restore와 off-provider restore 검증을 모든 profile의
+  필수 조건으로 둔다.
 
-## 권장 실행 순서
+## 복구 목표
 
-1. 라이선스와 Relay 접근 정책을 결정한다.
-2. SQLite snapshot을 실제 데이터로 반복 import하고 backup/restore drill을 수행한다.
-3. 위 결정을 ADR/threat model로 승인한다.
-4. 별도 `relay-v1` 패키지에서 read-only wire contract와 conformance 테스트를 구현한다.
-5. 사설 환경에서 TLS, secrets manager, 관측성, 부하·보안·복구 검증을 통과시킨다.
-6. SLO와 운영 승인 뒤에만 공개 배포한다.
+| 범위                   | 목표            | 근거                                |
+| ---------------------- | --------------- | ----------------------------------- |
+| primary failure domain | RPO 최대 1시간  | hourly verified backup              |
+| provider 전체 손실     | RPO 최대 24시간 | daily off-provider copy             |
+| 복구                   | RTO 최대 4시간  | 격리 환경 restore test 및 실제 측정 |
+
+daily off-provider copy를 유지하는 한 provider-loss RPO를 1시간이라고
+주장하지 않는다. 그 목표가 필요하면 off-provider copy도 hourly로 올리는
+별도 비용·보안·운영 결정을 해야 한다.
+
+## 다음 실행 순서
+
+1. 대상 운영 플랫폼을 정하고 IaC, TLS edge, rate limit, secret manager,
+   observability, retention ownership을 명시한다.
+2. local admin CLI를 scheduler에 연결해 hourly archive, daily independent copy,
+   정기 restore drill을 실제로 수행하고 증적을 남긴다.
+3. D1/R2 또는 PostgreSQL/S3 중 필요한 adapter를 하나 선택해 별도 패키지로
+   구현한다. D1/R2는 Workers ESM 빌드로 격리한다.
+4. 선택 adapter에 archive import/export, page-aware reads, conflict behavior,
+   conformance, migration/rollback을 구현한다.
+5. 격리 환경에서 provider-loss restore와 RTO를 측정한 뒤, SLO/alert 수치를
+   실제 traffic 기준으로 확정한다.
+6. 마지막으로 abuse/privacy policy와 capability 발급·회수 절차를 검토하고,
+   공개 traffic을 단계적으로 연결한다.
+
+세부 운영 절차는 [ops/README.md](ops/README.md), protocol 경계는
+[RELAY-V1-RFC.md](RELAY-V1-RFC.md)에 있다.

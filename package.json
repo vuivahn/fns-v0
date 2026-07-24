@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Async read-only Store Interface v0 for FNS Core",
+  "license": "MPL-2.0",
   "keywords": [
     "fns",
     "store",
@@ -20,13 +21,14 @@
   "scripts": {
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "check": "npm run lint && npm run format:check",
-    "coverage": "c8 --all --include=src/**/*.js --check-coverage --lines 90 --statements 90 --functions 85 --branches 75 node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js",
+    "coverage": "c8 --all --include=src/**/*.js --include=relay-v1/**/src/**/*.js --check-coverage --lines 90 --statements 90 --functions 85 --branches 75 node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
     "package:check": "npm pack --dry-run --ignore-scripts",
-    "test": "node --test test/store-interface.test.js test/sqlite-store.test.js",
-    "test:strict": "node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js"
+    "test": "node --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js",
+    "test:relay": "node --unhandled-rejections=strict --test test/relay-reference.test.js test/public-relay.test.js",
+    "test:strict": "node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js"
   },
   "engines": {
     "node": ">=20"

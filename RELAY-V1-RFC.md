@@ -1,69 +1,124 @@
-# Relay v1 RFC (draft)
+<!-- SPDX-License-Identifier: CC0-1.0 -->
 
-## Status and boundary
+# Relay v1 RFC
 
-This document prepares a future **Relay v1**. It does not add a relay to
-Store Interface v0, and it does not change the frozen `FnsStore` contract.
-Relay v1 must live in a separate package/service and depend on the v0 store
-interface as a read-only backend.
+## Status
 
-Store Interface v0 deliberately excludes relay protocol design, pagination,
-streaming, caching, federation, write/delete/sync APIs, ranking, and trust
-policy. This RFC is therefore a planning boundary, not a protocol
-specification or a deployment authorization.
+The local reference profile is implemented in \`relay-v1/\`; D1/R2 and
+PostgreSQL/S3-compatible adapters remain planned. This RFC does not change the
+frozen \`FnsStore\` v0 contract and does not authorize a public production
+deployment by itself.
 
-## Proposed read-only shape (not yet a wire contract)
+Relay is an optional discovery/publication service. No Relay is canonical,
+default, trusted, or an FNS-wide dependency.
 
-The service would expose only the existing store queries:
+## License boundary
 
-- fetch one object by canonical `objectId`;
-- discover bindings by `(context, alias)`;
-- discover releases by `binding`;
-- discover commune updates by `commune`;
-- return the v0 `Candidate` envelope and its completeness/provenance metadata
-  without silently selecting a head or ranking results.
+| Scope                                                  | License           |
+| ------------------------------------------------------ | ----------------- |
+| Relay contracts, local adapters, and conformance       | MPL-2.0           |
+| Public HTTP application and operational implementation | AGPL-3.0-or-later |
+| Specification, schemas, and vectors                    | CC0-1.0           |
 
-Exact paths, media types, pagination cursors, error payloads, authentication,
-and response-size limits are deferred until the decisions below are recorded.
-Malformed-but-addressable objects remain a store concern and must not be
-revalidated as a condition of relay lookup.
+The public application must stay physically separable from the MPL contract
+and adapter packages. See [LICENSES.md](LICENSES.md).
 
-## Safety controls for an eventual service
+## Read and publication model
 
-- Start with no write endpoints and database credentials that cannot write.
-- Terminate TLS at a managed edge; redirect/reject insecure public traffic.
-- Apply authentication, authorization, rate limits, body/query limits, and
-  per-tenant quotas before store access.
-- Use canonical ObjectId/request validation, bounded pagination, structured
-  errors, and no stack traces or sensitive payloads in responses.
-- Emit structured logs, metrics, traces, health/readiness checks, and audit
-  events while redacting credentials and private object content.
-- Encrypt backups, test restoration regularly, document runbooks, and alert on
-  availability, latency, error rate, storage integrity, and backup failures.
-- Keep secrets outside Git and inject them through the chosen deployment
-  platform's secret manager.
+\`\`\`text
+GET /healthz
+GET /readyz
+GET /v1/objects/{objectId}
+GET /v1/discovery/alias-bindings?context=&alias=&limit=&cursor=
+GET /v1/discovery/alias-releases?binding=&limit=&cursor=
+GET /v1/discovery/commune-documents?context=&limit=&cursor=
+POST /v1/publications
+\`\`\`
 
-## Decisions required before implementation or deployment
+The read endpoints are anonymous. \`POST /v1/publications\` accepts one strict
+JSON candidate and requires \`Authorization: Bearer fnsr1.{token-id}.{secret}\`.
+Tokens are opaque, locally stored by ID plus a pepper-based HMAC, scoped,
+expiring, and revocable. The raw bearer is returned only when created and is
+never placed in a URL, log, error, trace, or logical archive.
 
-| Decision                                     | Why it cannot be assumed                                                                       |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Authentication and authorization             | Determines whether data is public, signed-in, tenant-scoped, or operator-only.                 |
-| Hosting and TLS ownership                    | Determines cloud account, network boundary, certificates, monitoring, and incident access.     |
-| Storage topology                             | Determines whether SQLite is single-node only or a durable replicated service is required.     |
-| RPO, RTO, retention, and data classification | Determines backup frequency, restore design, encryption, and operational cost.                 |
-| Public wire contract                         | Determines versioning, media type, pagination, cache semantics, and compatibility commitments. |
-| Abuse and privacy policy                     | Determines rate limits, logging/redaction, deletion process, and response limits.              |
-| License and ownership                        | Determines reuse, contribution, and operating responsibility.                                  |
+Publication admission is Relay-local policy. The initial policy recognizes a
+general publish scope and optional object/context scopes; it neither reads nor
+creates FNS identity, trust, authority, signature, validation, ranking, or
+head-selection claims. Another authentication/policy adapter can replace it
+when it implements the same local admission boundary.
 
-## Suggested delivery sequence
+## Pagination and bounded work
 
-1. Record the above decisions in an approved ADR/threat model.
-2. Create a separate `relay-v1` package with contract tests against the shared
-   Store conformance fixtures.
-3. Run it privately with read-only credentials, monitoring, encrypted backups,
-   and a tested restore procedure.
-4. Promote only after load, security, recovery, and compatibility gates pass.
+\`complete\` in the existing store discovery envelope describes **coverage
+completeness**. HTTP pagination independently returns:
 
-The included `Dockerfile.ci` is intentionally a local/CI test container only:
-it exposes no ports, contains no secrets, and is not a production deployment
-image.
+\`\`\`json
+{
+"complete": false,
+"page": { "complete": false, "nextCursor": "fnsrc1..." }
+}
+\`\`\`
+
+Cursors are HMAC protected, route/query bound, and expire after five minutes by
+default. Relay adapters must perform cursor-aware bounded reads; the SQLite
+reference selects at most \`limit + 1\` rows to determine whether another page
+exists. Public defaults are page size 100, maximum 1,000, URL 8 KiB, request
+body 256 KiB, and response 1 MiB, all configurable per deployment.
+
+## Storage and archive contract
+
+The local profile uses:
+
+- \`SQLiteCandidateStore\` as the enduring reference candidate backend;
+- \`FileSystemBlobStore\` for content blobs;
+- a separate SQLite capability database.
+
+A blob is durably written before its candidate becomes visible. A crash can
+leave an unreachable blob, but must not publish a candidate whose local blob
+write failed. On POSIX the reference fsyncs file and directory metadata; on
+Windows operators must validate the platform's file-flush semantics in restore
+drills.
+
+\`fns.relay-archive.v1\` is backend-neutral: it carries a versioned candidate
+snapshot, matching blobs, an ISO UTC export time, and a SHA-256 digest over its
+canonical payload. It excludes credentials, tokens, token hashes, peppers,
+keys, operator accounts, rate-limit state, and audit logs. Restore defaults to
+validation; a destructive replacement requires explicit \`replace\` mode and an
+operator confirmation in the local CLI. Merge restore is intentionally not
+specified.
+
+## Deployment profiles
+
+| Profile             | Candidate backend | Blob backend  | Status                                       |
+| ------------------- | ----------------- | ------------- | -------------------------------------------- |
+| Local reference     | SQLite            | filesystem    | Implemented                                  |
+| Optional serverless | D1                | R2            | Contract target; Workers ESM adapter pending |
+| Scale alternative   | PostgreSQL        | S3-compatible | Contract target; adapter pending             |
+
+SQLite remains the permanent reference backend. PostgreSQL is a scale option,
+not a default or semantically superior authority. Serverless is an optional
+operating profile. Every adapter must pass the Relay contract/conformance suite
+and implement versioned logical export/restore before it can be used.
+
+## Operating objectives
+
+- Primary failure-domain RPO: at most one hour through hourly verified backup.
+- Provider-loss RPO: at most 24 hours while off-provider copy is daily.
+- RTO: at most four hours.
+- Daily off-provider copy and regular isolated restore tests are mandatory.
+
+The two RPO values are intentionally distinct. Achieving one-hour RPO for a
+complete provider loss would require hourly off-provider replication, which is
+not currently chosen. The runbook and adapter gates are in \`ops/\`.
+
+## Conditions before public deployment
+
+1. Select a hosting account, TLS edge, rate limit, secrets manager,
+   observability stack, retention, and incident owner.
+2. Set concrete traffic/latency/error SLOs after measuring the target profile.
+3. Automate hourly archives, daily independent copies, and isolated restore
+   tests; retain their evidence.
+4. Complete an abuse/privacy policy and an admission-token issuance/revocation
+   procedure.
+5. Test the actual cloud adapter, migration/rollback, and off-provider restore
+   before routing public traffic.

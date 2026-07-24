@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fns:relay:v1:relay-archive-schema",
+  "title": "FNS Relay archive v1",
+  "type": "object",
+  "required": ["version", "exportedAt", "candidateSnapshot", "blobs", "digest"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "fns.relay-archive.v1" },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "candidateSnapshot": {
+      "type": "object",
+      "required": ["version", "source", "snapshot", "dataRevision", "entries", "coverage"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": "fns.store-export.v1" },
+        "source": { "type": "string" },
+        "snapshot": { "type": ["string", "null"] },
+        "dataRevision": { "type": "integer", "minimum": 0 },
+        "entries": { "type": "array" },
+        "coverage": { "type": "array" }
+      }
+    },
+    "blobs": { "type": "array" },
+    "digest": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+  }
+}
