@@ -1,0 +1,39 @@
+{
+  "name": "fns-store-interface-v0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Async read-only Store Interface v0 for FNS Core",
+  "keywords": [
+    "fns",
+    "store",
+    "alias",
+    "discovery"
+  ],
+  "type": "commonjs",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/adapter.js && node --check src/errors.js && node --check src/fns-store.js && node --check src/memory-store.js && node --check test/store-interface.test.js",
+    "test": "node test/store-interface.test.js",
+    "test:strict": "node --unhandled-rejections=strict test/store-interface.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "fns-v0-validator": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/vuivahn/fns-v0.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vuivahn/fns-v0/issues"
+  },
+  "homepage": "https://github.com/vuivahn/fns-v0#readme"
+}

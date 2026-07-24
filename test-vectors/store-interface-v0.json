@@ -1,0 +1,28 @@
+{
+  "version": "fns.store-interface-v0",
+  "objectIds": {
+    "context": "fns:obj:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "bindingA": "fns:obj:sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA",
+    "bindingB": "fns:obj:sha256:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA",
+    "release": "fns:obj:sha256:DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDA",
+    "unindexed": "fns:obj:sha256:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEA"
+  },
+  "query": { "alias": "alice" },
+  "cases": [
+    "adapter-contract-validation",
+    "async-adapter",
+    "canonical-object-id",
+    "codepoint-order",
+    "equivalent-duplicate",
+    "conflicting-object-id",
+    "malformed-addressable",
+    "unindexed-malformed",
+    "defensive-copy",
+    "invalid-request",
+    "independent-completeness",
+    "provenance-and-warnings",
+    "falsy-candidate-conflict",
+    "json-value-boundary",
+    "parallel-failure-observation"
+  ]
+}
