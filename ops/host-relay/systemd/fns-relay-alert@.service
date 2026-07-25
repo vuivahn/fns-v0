@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=FNS Relay failure alert for %I
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# The recovery host has only recovery.env; the primary host has relay.env.
+EnvironmentFile=-/etc/fns-relay/relay.env
+EnvironmentFile=-/etc/fns-relay/recovery.env
+ExecStart=/usr/bin/env bash /opt/fns-relay/bin/alert.sh %I
+TimeoutStartSec=1min

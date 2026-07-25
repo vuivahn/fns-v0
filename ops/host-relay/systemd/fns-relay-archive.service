@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [Unit]
 Description=FNS Relay verified logical archive
-After=fns-relay.service
-Requires=fns-relay.service
+# This job is intentionally profile-neutral: the same Relay data can be served
+# by either fns-relay.service (direct TLS) or fns-relay-funnel.service. Do not
+# make it pull in one profile while the other owns the data paths.
+After=docker.service
+Requires=docker.service
+OnFailure=fns-relay-alert@%n.service
 
 [Service]
 Type=oneshot

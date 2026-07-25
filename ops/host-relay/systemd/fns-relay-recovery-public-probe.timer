@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=Probe the FNS Relay public endpoint every five minutes from recovery host
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=fns-relay-recovery-public-probe.service
+
+[Install]
+WantedBy=timers.target

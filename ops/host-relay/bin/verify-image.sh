@@ -9,12 +9,19 @@ source "${script_directory}/common.sh"
 require_root
 require_command docker sed
 require_runtime_configuration
-require_var FNS_RELAY_EDGE_IMAGE FNS_RELAY_NODE_IMAGE
+require_var FNS_RELAY_NODE_IMAGE
 
-[[ "$FNS_RELAY_EDGE_IMAGE" =~ ^[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}$ ]] \
-  || fail "FNS_RELAY_EDGE_IMAGE must be a reviewed immutable image digest"
-[[ "$FNS_RELAY_EDGE_IMAGE" != *"@sha256:0000000000000000000000000000000000000000000000000000000000000000" ]] \
-  || fail "FNS_RELAY_EDGE_IMAGE still has the example placeholder digest"
+# The archive job only reads candidate/blob data through the Relay image; it
+# never starts the edge. Passing --relay-only skips the edge-image pin so an
+# archive-only host is not forced to declare an image it will not use. The
+# serving profiles invoke this script with no argument and require the edge.
+if [[ "${1:-}" != "--relay-only" ]]; then
+  require_var FNS_RELAY_EDGE_IMAGE
+  [[ "$FNS_RELAY_EDGE_IMAGE" =~ ^[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}$ ]] \
+    || fail "FNS_RELAY_EDGE_IMAGE must be a reviewed immutable image digest"
+  [[ "$FNS_RELAY_EDGE_IMAGE" != *"@sha256:0000000000000000000000000000000000000000000000000000000000000000" ]] \
+    || fail "FNS_RELAY_EDGE_IMAGE still has the example placeholder digest"
+fi
 
 build_record="${FNS_RELAY_EVIDENCE_DIR}/current-image-build.json"
 require_existing_file "$build_record"

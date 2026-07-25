@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=FNS Relay Tailscale Funnel public-beta service
+Wants=network-online.target tailscaled.service
+After=network-online.target docker.service tailscaled.service
+Requires=docker.service
+Conflicts=fns-relay.service
+OnFailure=fns-relay-alert@%n.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/fns-relay/relay.env
+WorkingDirectory=/opt/fns-relay
+ExecStartPre=/usr/bin/env bash /opt/fns-relay/bin/assert-active-profile.sh funnel
+ExecStartPre=/usr/bin/env bash /opt/fns-relay/bin/verify-image.sh
+ExecStart=/usr/bin/docker compose --project-name fns-relay-funnel --env-file /etc/fns-relay/relay.env --file /opt/fns-relay/compose.funnel.yaml up --detach --remove-orphans
+ExecStartPost=/usr/bin/env bash /opt/fns-relay/bin/funnel.sh start
+ExecStop=-/usr/bin/env bash /opt/fns-relay/bin/funnel.sh stop
+ExecStop=/usr/bin/docker compose --project-name fns-relay-funnel --env-file /etc/fns-relay/relay.env --file /opt/fns-relay/compose.funnel.yaml stop --timeout 15
+TimeoutStartSec=2min
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

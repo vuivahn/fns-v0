@@ -10,7 +10,7 @@ require_root
 require_command docker flock install sed sha256sum
 require_runtime_configuration
 require_var FNS_RELAY_NODE_IMAGE
-bash "${script_directory}/verify-image.sh"
+bash "${script_directory}/verify-image.sh" --relay-only
 require_existing_directory \
   "$FNS_RELAY_CANDIDATE_DIR" \
   "$FNS_RELAY_BLOB_DIR" \

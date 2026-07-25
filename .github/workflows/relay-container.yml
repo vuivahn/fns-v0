@@ -29,8 +29,10 @@ jobs:
           node-version: 22.x
       - run: npm run test:container
       - run: npm run check:host-relay
+      - run: npm run check:relay-funnel
       - run: bash -n ops/host-relay/bin/*.sh
       - run: docker compose --env-file ops/host-relay/relay.env.example --file ops/host-relay/compose.yaml config >/dev/null
+      - run: docker compose --env-file ops/host-relay/relay.funnel.env.example --file ops/host-relay/compose.funnel.yaml config >/dev/null
       - run: |
           systemd-analyze timespan '2min'
           systemd-analyze timespan '15min'
@@ -83,3 +85,5 @@ jobs:
           sudo -E bash ops/host-relay/bin/build-image.sh
       - name: Exercise the disposable Linux host profile
         run: sudo -E bash ops/host-relay/bin/target-host-smoke.sh
+      - name: Exercise the disposable Funnel edge profile
+        run: sudo -E bash ops/host-relay/bin/target-host-funnel-smoke.sh
