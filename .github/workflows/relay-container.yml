@@ -53,22 +53,24 @@ jobs:
       FNS_RELAY_EDGE_HTTP_PORT: "80"
       FNS_RELAY_EDGE_HTTPS_BIND: 0.0.0.0
       FNS_RELAY_EDGE_HTTPS_PORT: "443"
-      FNS_RELAY_CANDIDATE_DIR: ${{ runner.temp }}/fns-relay-production/candidates
-      FNS_RELAY_BLOB_DIR: ${{ runner.temp }}/fns-relay-production/blobs
-      FNS_RELAY_CAPABILITY_DIR: ${{ runner.temp }}/fns-relay-production/capabilities
-      FNS_RELAY_SECRETS_DIR: ${{ runner.temp }}/fns-relay-production/secrets
-      FNS_RELAY_ARCHIVE_STAGING_DIR: ${{ runner.temp }}/fns-relay-production/archive-staging
-      FNS_RELAY_VERIFIED_ARCHIVE_DIR: ${{ runner.temp }}/fns-relay-production/verified-archive
-      FNS_RELAY_EVIDENCE_DIR: ${{ runner.temp }}/fns-relay-production/evidence
-      FNS_RELAY_DRILL_ROOT: ${{ runner.temp }}/fns-relay-production/drills
-      FNS_RELAY_TLS_DIR: ${{ runner.temp }}/fns-relay-production/tls
-      FNS_RELAY_ACME_WEBROOT: ${{ runner.temp }}/fns-relay-production/acme
-      FNS_RELAY_SMOKE_ROOT: ${{ runner.temp }}/fns-relay-host-smoke
       FNS_RELAY_SMOKE_CONFIRM: I_UNDERSTAND_THIS_IS_NONPRODUCTION
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Configure disposable host paths
+        run: |
+          echo "FNS_RELAY_CANDIDATE_DIR=$RUNNER_TEMP/fns-relay-production/candidates" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_BLOB_DIR=$RUNNER_TEMP/fns-relay-production/blobs" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_CAPABILITY_DIR=$RUNNER_TEMP/fns-relay-production/capabilities" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_SECRETS_DIR=$RUNNER_TEMP/fns-relay-production/secrets" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_ARCHIVE_STAGING_DIR=$RUNNER_TEMP/fns-relay-production/archive-staging" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_VERIFIED_ARCHIVE_DIR=$RUNNER_TEMP/fns-relay-production/verified-archive" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_EVIDENCE_DIR=$RUNNER_TEMP/fns-relay-production/evidence" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_DRILL_ROOT=$RUNNER_TEMP/fns-relay-production/drills" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_TLS_DIR=$RUNNER_TEMP/fns-relay-production/tls" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_ACME_WEBROOT=$RUNNER_TEMP/fns-relay-production/acme" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_SMOKE_ROOT=$RUNNER_TEMP/fns-relay-host-smoke" >> "$GITHUB_ENV"
       - name: Resolve reviewed test image digests
         run: |
           docker pull node:22-bookworm-slim
