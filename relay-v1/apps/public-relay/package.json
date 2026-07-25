@@ -11,6 +11,6 @@
     "start": "node ./bin/start.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

@@ -34,10 +34,10 @@
     "test:strict": "node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
-    "better-sqlite3": "12.4.1",
+    "better-sqlite3": "13.0.1",
     "fns-v0-validator": "0.11.0"
   },
   "repository": {
