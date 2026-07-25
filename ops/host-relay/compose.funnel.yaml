@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This is intentionally separate from compose.yaml. The direct-TLS profile owns
+# host ports 80/443, whereas the Funnel profile only exposes its edge on an
+# IPv4 loopback port for tailscaled to reach through a TLS-terminated TCP
+# forwarder. Do not start both profiles on the same Relay data directories.
+name: fns-relay-funnel
+
+services:
+  relay:
+    image: ${FNS_RELAY_IMAGE:?FNS_RELAY_IMAGE is required}
+    container_name: ${FNS_RELAY_RELAY_CONTAINER_NAME:-fns-relay}
+    user: "10001:10001"
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    environment:
+      FNS_RELAY_CAPABILITY_PEPPER_FILE: /run/secrets/capability-pepper
+      FNS_RELAY_CURSOR_SECRET_FILE: /run/secrets/cursor-secret
+    volumes:
+      - type: bind
+        source: ${FNS_RELAY_CANDIDATE_DIR:?FNS_RELAY_CANDIDATE_DIR is required}
+        target: /var/lib/fns-relay/candidates
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_BLOB_DIR:?FNS_RELAY_BLOB_DIR is required}
+        target: /var/lib/fns-relay/blobs
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_CAPABILITY_DIR:?FNS_RELAY_CAPABILITY_DIR is required}
+        target: /var/lib/fns-relay/capabilities
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_SECRETS_DIR:?FNS_RELAY_SECRETS_DIR is required}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - relay
+
+  funnel-edge:
+    image: ${FNS_RELAY_EDGE_IMAGE:?FNS_RELAY_EDGE_IMAGE is required}
+    container_name: ${FNS_RELAY_FUNNEL_EDGE_CONTAINER_NAME:-fns-relay-funnel-edge}
+    user: "101:101"
+    depends_on:
+      relay:
+        condition: service_healthy
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /etc/nginx/conf.d:rw,nosuid,nodev,noexec,size=1m,mode=0750,uid=101,gid=101
+      - /var/cache/nginx:rw,nosuid,nodev,noexec,size=16m,mode=0750,uid=101,gid=101
+      - /run:rw,nosuid,nodev,noexec,size=1m,mode=0750,uid=101,gid=101
+    ports:
+      - "${FNS_RELAY_FUNNEL_EDGE_BIND:-127.0.0.1}:${FNS_RELAY_FUNNEL_EDGE_PORT:-18080}:8080"
+    volumes:
+      - type: bind
+        source: ./nginx/funnel.conf.template
+        target: /etc/nginx/templates/funnel.conf.template
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - relay
+
+networks:
+  relay:
+    internal: true

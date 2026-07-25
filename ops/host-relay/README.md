@@ -107,6 +107,87 @@ parameterized only so `target-host-smoke.sh` can use isolated names and
 loopback high ports; production retains `fns-relay`, `fns-relay-edge`, and
 ports 80/443.
 
+## Tailscale Funnel home-server public beta
+
+`compose.funnel.yaml` is a separate profile for a public beta on a host that
+already uses ports `80/443`, such as a home server. It does not make this Relay
+canonical, default, trusted, or an FNS-wide dependency. Funnel is a beta,
+`ts.net`-addressed transport with provider-controlled bandwidth limits; keep a
+custom-domain VM edge as the long-term production option.
+
+```text
+Internet HTTPS :8443
+  -> Tailscale Funnel (TLS termination, PROXY protocol v2)
+  -> 127.0.0.1:18080 on the home server
+  -> Nginx Funnel edge :8080 (private Docker network)
+  -> Relay :8080 (private Docker network only)
+```
+
+The default public port is `8443`, leaving the host's `80/443` owner untouched.
+The loopback edge accepts **only** PROXY protocol v2. This is deliberate:
+Tailscale forwards the original client address in that header, allowing Nginx
+to apply its read/publication rate limits per client instead of globally. Do
+not replace `$proxy_protocol_addr` with an untrusted forwarded header and do
+not publish the edge to `0.0.0.0`.
+
+Before enabling it, confirm that the Tailscale node has MagicDNS/HTTPS and a
+narrow Funnel policy grant (preferably on a dedicated Relay node or tag), and
+that the selected public port is currently free. Copy
+`relay.funnel.env.example` to the same protected `relay.env` location used by
+the backup jobs, set reviewed image digests and durable paths, then use the
+separate Funnel unit:
+
+```sh
+sudo install --mode 0644 /opt/fns-relay/systemd/fns-relay-funnel.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fns-relay-funnel.service
+```
+
+The unit starts `compose.funnel.yaml` and then runs `bin/funnel.sh start`.
+That command uses a persistent Tailscale `--bg` configuration, TLS-terminated
+TCP, and PROXY protocol v2. `bin/funnel.sh verify` records the local boundary
+and `tailscale funnel status --json` under the evidence directory. It does not
+prove public DNS or a working backend from an independent network; perform an
+external anonymous-read smoke as well. Stop this endpoint with
+`bin/funnel.sh stop`; do not use `tailscale funnel reset`, which can remove
+unrelated Funnel configuration on the host.
+
+Do not run `fns-relay.service` (the direct TLS profile) and
+`fns-relay-funnel.service` against the same data paths. The Funnel profile
+still requires application-level capability bearer authentication for
+publication: Funnel grants no FNS publication authority.
+
+### Deliberately limited non-root home beta
+
+If a trusted home-server account has Docker access but cannot install a root
+systemd unit, `home-funnel-beta-bootstrap.sh` initializes only a user-owned
+runtime tree and builds a reviewed image. It generates two local Relay secrets
+only when neither exists, makes them unreadable to the host user after setup,
+and uses narrowly mounted Docker helpers to assign the service UID/GID. Set
+`FNS_RELAY_HOME_BETA_ROOT` plus all durable paths below that root and explicitly
+acknowledge the beta class:
+
+```sh
+export FNS_RELAY_HOME_BETA_CONFIRM=I_UNDERSTAND_HOME_FUNNEL_BETA_IS_NOT_SLO_COMPLIANT
+bash /path/to/fns-v0/ops/host-relay/bin/home-funnel-beta-bootstrap.sh
+docker compose --project-name fns-relay-funnel --env-file /path/to/relay.env \
+  --file /path/to/fns-v0/ops/host-relay/compose.funnel.yaml up --detach
+bash /path/to/fns-v0/ops/host-relay/bin/funnel.sh start
+```
+
+This path is suitable only for the public-beta endpoint. It is **not** allowed
+to claim the stated RPO/RTO until root-managed archive timers, an independent
+encrypted off-provider destination, restore drills, and alert delivery have
+been configured and evidenced. Docker access itself is host-root-equivalent;
+do not grant it to an untrusted account.
+
+`target-host-funnel-smoke.sh` is the Linux/amd64 disposable test for this
+profile. It validates the loopback-only port, PROXY v2 parsing, health/readiness
+hiding, capability publication, anonymous pagination, graceful restart, and a
+verified logical archive without altering Tailscale state. It complements,
+rather than replaces, `target-host-smoke.sh`'s direct-TLS fresh-restore and
+bad-permission coverage.
+
 ## Target-host smoke (explicitly non-production)
 
 Run the following only after a real reviewed Relay image/build record and edge
