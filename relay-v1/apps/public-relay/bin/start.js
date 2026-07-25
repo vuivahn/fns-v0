@@ -36,7 +36,7 @@ function readBakedSourceOfferUrl() {
     if (value.length === 0) throw new Error("the source offer file is empty");
     return value;
   } catch (error) {
-    throw new Error(`could not read baked source offer: ${error.message}`);
+    throw new Error(`could not read baked source offer: ${error.message}`, { cause: error });
   }
 }
 

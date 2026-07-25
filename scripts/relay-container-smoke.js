@@ -175,7 +175,9 @@ async function waitForRelayReadiness(baseUrl, container, pathname = "/readyz") {
     const state = docker(["inspect", container, "--format", "{{json .State}}"]).stdout.trim();
     const logResult = docker(["logs", "--tail", "100", container]);
     const logs = [logResult.stdout, logResult.stderr].filter(Boolean).join("\n").trim();
-    throw new Error(`${error.message}\n${container} state: ${state}\n${container} logs:\n${logs}`);
+    throw new Error(`${error.message}\n${container} state: ${state}\n${container} logs:\n${logs}`, {
+      cause: error
+    });
   }
 }
 

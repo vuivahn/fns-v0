@@ -67,7 +67,7 @@ class CursorCodec {
     } catch {
       throw new RelayProtocolError("cursor payload is malformed");
     }
-    let queryMatches = false;
+    let queryMatches;
     try {
       queryMatches = stableJson(payload?.query) === stableJson(query);
     } catch {
