@@ -29,6 +29,17 @@ classification, 운영 인력, provider 계약을 검토한 뒤 별도 SLO 문�
 로그·trace·metric label에는 bearer token, authorization header, private object
 content, encryption key, 전체 object ID 목록을 넣지 않는다.
 
+[Linux host profile](host-relay/README.md)는 5분마다 local readiness와
+archive/copy/drill evidence age를 확인하는 `check-slos.sh` systemd job을
+제공한다. paging provider를 임의로 정하지 않으므로, 공개 traffic 전에는 대상
+platform이 failed unit 또는 구조화된 출력을 선택한 alert receiver로 전달해야
+한다.
+
+`fns-relay-archive.service`의 10분 execution budget 초과나 실패도 즉시 page
+대상이다. 15분 cadence는 여유를 주기 위한 것이며, archive+verification이
+그 budget을 지속적으로 넘는다면 storage/profile 용량을 조정하거나 backend
+전환 기준을 검토한다.
+
 ## 알림 우선순위
 
 ### 즉시 대응 (page)

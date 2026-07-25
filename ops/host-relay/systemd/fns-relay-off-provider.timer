@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=Run FNS Relay off-provider copy twice daily
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+OnCalendar=*-*-* 12:15:00
+Persistent=true
+RandomizedDelaySec=15min
+Unit=fns-relay-off-provider.service
+
+[Install]
+WantedBy=timers.target

@@ -18,23 +18,31 @@
 ## 매시간: logical archive와 검증
 
 1. 운영 scheduler가 고유한 새 파일 경로를 만들고 export를 실행한다.
-   \`export\`는 기존 파일을 덮어쓰지 않는다.
+   `export`는 기존 파일을 덮어쓰지 않는다.
 
-   \`\`\`powershell
+   ```powershell
    npm.cmd --prefix relay-v1/apps/public-relay run admin -- export C:\relay-backups\relay-2026-07-24T010000Z.json
-   \`\`\`
+   ```
 
 2. 종료 코드, archive digest, destination file mode, 생성 시각을 기록한다.
 3. 같은 profile에서 전체 integrity 확인을 실행한다.
 
-   \`\`\`powershell
+   ```powershell
    npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify
-   \`\`\`
+   ```
 
-4. 실패하거나 마지막 검증 archive가 한 시간을 넘으면 primary RPO 위반
+4. archive-only `verify-archive`로 contract와 digest를 candidate DB/blob
+   directory를 열지 않고 다시 확인한다. 이 검사는 off-provider copy receipt와
+   restore 전 검사에 사용한다.
+
+   ```powershell
+   npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify-archive C:\relay-backups\relay-2026-07-24T010000Z.json
+   ```
+
+5. 실패하거나 마지막 검증 archive가 한 시간을 넘으면 primary RPO 위반
    incident로 처리한다. 다음 주기를 기다리지 않는다.
 
-\`/readyz\`는 full archive 검증이 아니다. public endpoint에 O(N) I/O를
+`/readyz`는 full archive 검증이 아니다. public endpoint에 O(N) I/O를
 노출하지 않기 위해 가벼운 저장소 reachability만 확인한다.
 
 ## 매일: off-provider copy
@@ -57,23 +65,29 @@
 
 1. production credential을 주입하지 않은 별도 candidate DB, capability DB,
    blob directory를 만든다.
-2. archive를 validation-only로 읽는다.
+2. archive를 storage 없이 먼저 `verify-archive`로 검증한다.
 
-   \`\`\`powershell
+   ```powershell
+   npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify-archive C:\relay-backups\relay.json
+   ```
+
+3. archive를 candidate/blob target에 validation-only로 읽는다.
+
+   ```powershell
    npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-validate C:\relay-backups\relay.json
-   \`\`\`
+   ```
 
-3. 그 격리 대상에만 명시적으로 replacement restore를 수행한다.
+4. 그 격리 대상에만 명시적으로 replacement restore를 수행한다.
 
-   \`\`\`powershell
+   ```powershell
    npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-replace C:\relay-backups\relay.json --confirm-replace
-   \`\`\`
+   ```
 
-4. \`admin -- verify\`, object/blob inventory, representative public read query,
+5. `admin -- verify`, object/blob inventory, representative public read query,
    candidate/blob conformance, archive digest를 검증한다.
-5. 시작부터 검증된 read service까지의 시간을 기록한다. 4시간을 넘기면 RTO
+6. 시작부터 검증된 read service까지의 시간을 기록한다. 4시간을 넘기면 RTO
    미달 incident다.
-6. 사용 archive, digest, elapsed time, 실패/불일치, corrective action을
+7. 사용 archive, digest, elapsed time, 실패/불일치, corrective action을
    보존한다.
 
 ## 장애 대응
@@ -96,3 +110,7 @@
 archive format, storage adapter, migration, deployment, token handling,
 retention, encryption, or scheduler를 바꾸면 다음 restore drill이 성공하기
 전까지 변경을 완료로 선언하지 않는다.
+
+Linux reference host의 분리된 archive/copy/drill automation과 evidence
+format은 [host-relay profile](host-relay/README.md)에 있다. 실제 provider,
+account, credential 경계와 alert receiver는 해당 host의 운영 기록에 남긴다.

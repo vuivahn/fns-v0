@@ -56,6 +56,7 @@ confirmation flag.
 ```powershell
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- export C:\relay-backups\relay.json
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify
+npm.cmd --prefix relay-v1/apps/public-relay run admin -- verify-archive C:\relay-backups\relay.json
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-validate C:\relay-backups\relay.json
 npm.cmd --prefix relay-v1/apps/public-relay run admin -- restore-replace C:\relay-backups\relay.json --confirm-replace
 ```
@@ -80,3 +81,9 @@ npm.cmd --prefix relay-v1/apps/public-relay run admin -- revoke-capability <capa
 Archives contain immutable candidate data, coverage, blobs, and a digest. They
 intentionally exclude bearer tokens, token hashes, peppers, signing keys,
 operator accounts, and rate-limit state.
+
+`verify-archive` is intentionally archive-only: it checks the portable archive
+contract and digest without opening a candidate database or blob directory. It
+is suitable for an off-provider archive receipt before any restore target is
+mounted. `restore-validate` remains a data-admin operation for a configured
+local profile.

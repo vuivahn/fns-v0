@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: fns-relay
+
+services:
+  relay:
+    image: ${FNS_RELAY_IMAGE:?FNS_RELAY_IMAGE is required}
+    container_name: ${FNS_RELAY_RELAY_CONTAINER_NAME:-fns-relay}
+    user: "10001:10001"
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    ports:
+      - "127.0.0.1:${FNS_RELAY_PROBE_PORT:-18080}:8080"
+    environment:
+      FNS_RELAY_CAPABILITY_PEPPER_FILE: /run/secrets/capability-pepper
+      FNS_RELAY_CURSOR_SECRET_FILE: /run/secrets/cursor-secret
+    volumes:
+      - type: bind
+        source: ${FNS_RELAY_CANDIDATE_DIR:?FNS_RELAY_CANDIDATE_DIR is required}
+        target: /var/lib/fns-relay/candidates
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_BLOB_DIR:?FNS_RELAY_BLOB_DIR is required}
+        target: /var/lib/fns-relay/blobs
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_CAPABILITY_DIR:?FNS_RELAY_CAPABILITY_DIR is required}
+        target: /var/lib/fns-relay/capabilities
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_SECRETS_DIR:?FNS_RELAY_SECRETS_DIR is required}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - relay
+
+  edge:
+    profiles: [edge]
+    image: ${FNS_RELAY_EDGE_IMAGE:?FNS_RELAY_EDGE_IMAGE is required}
+    container_name: ${FNS_RELAY_EDGE_CONTAINER_NAME:-fns-relay-edge}
+    user: "101:101"
+    depends_on:
+      relay:
+        condition: service_healthy
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /etc/nginx/conf.d:rw,nosuid,nodev,noexec,size=1m
+      - /var/cache/nginx:rw,nosuid,nodev,noexec,size=16m
+      - /var/run:rw,nosuid,nodev,noexec,size=1m
+    ports:
+      - "${FNS_RELAY_EDGE_HTTP_BIND:-0.0.0.0}:${FNS_RELAY_EDGE_HTTP_PORT:-80}:80"
+      - "${FNS_RELAY_EDGE_HTTPS_BIND:-0.0.0.0}:${FNS_RELAY_EDGE_HTTPS_PORT:-443}:443"
+    environment:
+      FNS_RELAY_DOMAIN: ${FNS_RELAY_DOMAIN:?FNS_RELAY_DOMAIN is required}
+    volumes:
+      - type: bind
+        source: ./nginx/relay.conf.template
+        target: /etc/nginx/templates/relay.conf.template
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_TLS_DIR:?FNS_RELAY_TLS_DIR is required}
+        target: /etc/nginx/certs
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FNS_RELAY_ACME_WEBROOT:?FNS_RELAY_ACME_WEBROOT is required}
+        target: /var/www/acme
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - relay
+
+networks:
+  relay:
+    internal: true

@@ -408,6 +408,9 @@ test("public Relay admin CLI exports, verifies, and explicitly restores a portab
     const exported = await runRelayAdmin(dataOnlyEnvironment, ["export", archive]);
     assert.strictEqual(exported.code, 0, exported.stderr);
     assert.strictEqual(JSON.parse(exported.stdout).command, "export");
+    const archiveOnly = await runRelayAdmin({}, ["verify-archive", archive]);
+    assert.strictEqual(archiveOnly.code, 0, archiveOnly.stderr);
+    assert.strictEqual(JSON.parse(archiveOnly.stdout).result.entries, 0);
     const validated = await runRelayAdmin(dataOnlyEnvironment, ["restore-validate", archive]);
     assert.strictEqual(validated.code, 0, validated.stderr);
     const rejectedReplacement = await runRelayAdmin(dataOnlyEnvironment, ["restore-replace", archive]);

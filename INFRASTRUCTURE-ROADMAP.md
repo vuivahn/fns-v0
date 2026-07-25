@@ -6,14 +6,14 @@
 
 ## 현재 상태
 
-| 단계                      | 상태               | 완료된 기준                                                                                       | 남은 종료 조건                                                              |
-| ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1. 기준선·라이선스        | 완료               | Git 기준선, MPL/AGPL/CC0 경계, 전문과 패키지 메타데이터                                           | 릴리스 시 각 독립 배포물에 동일한 고지 포함                                 |
-| 2. 품질 게이트            | 완료               | Node 20/22/24 CI, lint, format, strict test, coverage, audit, package dry-run                     | PR마다 계속 통과하고 취약점 경고를 정기 처리                                |
-| 3. 어댑터 적합성          | 로컬 완료          | Relay contract/conformance, immutable conflict, blob conflict, bounded page 검증                  | D1/R2·PostgreSQL/S3 어댑터도 동일 runner 통과                               |
-| 4. 영속 reference backend | 완료               | SQLite migration/WAL/integrity/physical backup/logical export, filesystem blob durability         | 실데이터 restore drill을 정기 실행                                          |
-| 5. Relay v1               | 로컬 완료          | anonymous read, capability-gated publication, cursor, bounded SQL page, archive, health/readiness | cloud adapter, edge TLS/rate limit, 실제 공개 배포 검증                     |
-| 6. 운영화                 | 문서·로컬 CLI 완료 | runbook, SLO/alert 기준, backend transition gate, archive admin CLI                               | scheduler/IaC/secrets/metrics/alerts/off-provider copy를 대상 플랫폼에 구현 |
+| 단계                      | 상태            | 완료된 기준                                                                                                            | 남은 종료 조건                                                                 |
+| ------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 1. 기준선·라이선스        | 완료            | Git 기준선, MPL/AGPL/CC0 경계, 전문과 패키지 메타데이터                                                                | 릴리스 시 각 독립 배포물에 동일한 고지 포함                                    |
+| 2. 품질 게이트            | 완료            | Node 20/22/24 CI, lint, format, strict test, coverage, audit, package dry-run                                          | PR마다 계속 통과하고 취약점 경고를 정기 처리                                   |
+| 3. 어댑터 적합성          | 로컬 완료       | Relay contract/conformance, immutable conflict, blob conflict, bounded page 검증                                       | D1/R2·PostgreSQL/S3 어댑터도 동일 runner 통과                                  |
+| 4. 영속 reference backend | 완료            | SQLite migration/WAL/integrity/physical backup/logical export, filesystem blob durability                              | 실데이터 restore drill을 정기 실행                                             |
+| 5. Relay v1               | reference 완료  | anonymous read, capability-gated publication, cursor, bounded SQL page, archive, health/readiness, CI Linux host smoke | 실제 target host에서 TLS/rate limit와 공개 smoke 검증                          |
+| 6. 운영화                 | automation 준비 | runbook, SLO/alert 기준, host Compose/systemd, hourly archive, daily copy, isolated restore drill                      | VM/DNS/TLS/secrets/alert receiver/off-provider credential를 실제 플랫폼에 연결 |
 
 ## 확정된 원칙
 
@@ -44,11 +44,13 @@ daily off-provider copy를 유지하는 한 provider-loss RPO를 1시간이라�
 
 ## 다음 실행 순서
 
-1. 대상 운영 플랫폼을 정하고 IaC, TLS edge, rate limit, secret manager,
-   observability, retention ownership을 명시한다.
-2. local admin CLI를 scheduler에 연결해 hourly archive, daily independent copy,
-   정기 restore drill을 실제로 수행하고 증적을 남긴다.
-3. D1/R2 또는 PostgreSQL/S3 중 필요한 adapter를 하나 선택해 별도 패키지로
+1. single `linux/amd64` VM reference profile의 실제 host, DNS, TLS certificate,
+   independent encrypted off-provider remote, alert receiver, retention
+   ownership을 정하고 운영 기록에 명시한다.
+2. 제공된 host Compose/systemd bundle을 target에 설치해 hourly archive, daily
+   independent copy, weekly isolated restore drill을 실제로 수행하고 evidence를
+   보존한다. target-host container smoke와 RTO를 함께 측정한다.
+3. 이후 필요가 확인될 때만 D1/R2 또는 PostgreSQL/S3 중 하나를 별도 패키지로
    구현한다. D1/R2는 Workers ESM 빌드로 격리한다.
 4. 선택 adapter에 archive import/export, page-aware reads, conflict behavior,
    conformance, migration/rollback을 구현한다.

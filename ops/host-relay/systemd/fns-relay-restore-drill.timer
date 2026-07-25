@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=Run FNS Relay off-provider restore drill weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=30min
+Unit=fns-relay-restore-drill.service
+
+[Install]
+WantedBy=timers.target

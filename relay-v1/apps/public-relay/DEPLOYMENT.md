@@ -13,6 +13,10 @@ The first public instance should be a single Linux container host or VM with
 durable block-backed storage and a separate TLS/rate-limit edge. It does not
 make that Relay canonical, default, trusted, or an FNS-wide dependency.
 
+The executable provider-neutral reference bundle, including Compose, Nginx,
+systemd timers, verified archives, off-provider copy, and isolated restore
+drills, is in [the first Linux host profile](../../../ops/host-relay/README.md).
+
 ## Build and source offer
 
 Build from the repository root. The source-offer argument is deliberately a
@@ -112,6 +116,9 @@ Exports may run while the Relay serves traffic: the candidate snapshot is
 transactional, blobs are immutable, and publication writes a blob before it
 makes its candidate visible. Each produced archive still requires digest
 verification and an isolated restore drill. Do not restore into a live writer.
+Use `admin.js verify-archive <archive.json>` for archive-only contract/digest
+validation before mounting any data target; it requires neither candidate/blob
+storage nor Relay secrets.
 
 Capability issuance/revocation is a separate privileged operation: it may
 mount only the capability database and the capability pepper, never archive

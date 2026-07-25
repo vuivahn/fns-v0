@@ -35,6 +35,8 @@ primary RPO와 provider-loss RPO를 혼동하지 않는다. provider 전체 손�
 - [Relay runbook](relay-runbook.md): archive, copy, restore, incident 절차
 - [SLO와 alert 기준](slo-alerts.md): 측정·경보 최소 기준
 - [Backend 전환 기준](backend-transition.md): SQLite 유지·대체 adapter 선택 gate
+- [첫 Linux host profile](host-relay/README.md): Compose, edge, backup, copy,
+  isolated restore drill, systemd timer 기준
 
 로컬 기준 application의 실행과 archive CLI는
 [public Relay application guide](../relay-v1/apps/public-relay/README.md)에 있다.

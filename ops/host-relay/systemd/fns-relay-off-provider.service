@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=FNS Relay independent off-provider archive copy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fns-relay/relay.env
+ExecStart=/usr/bin/env bash /opt/fns-relay/bin/off-provider-copy.sh
+TimeoutStartSec=4h

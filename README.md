@@ -70,8 +70,12 @@ documented in [Relay v1 specification](specs/relay-v1/README.md).
 
 To run the local app or create/validate/restore an archive, follow
 [the public Relay application guide](relay-v1/apps/public-relay/README.md).
-No D1/R2, PostgreSQL/S3, public cloud account, DNS, TLS edge, or public
-deployment is claimed or configured in this repository yet.
+The repository now includes a provider-neutral Linux host profile for the
+SQLite/filesystem reference Relay: Docker Compose, an Nginx TLS/rate-limit
+edge, verified archives, encrypted off-provider copy hooks, and isolated
+restore-drill automation. No cloud account, DNS zone, TLS certificate,
+off-provider destination, or live public deployment is claimed or configured
+here yet.
 
 ## Verification
 

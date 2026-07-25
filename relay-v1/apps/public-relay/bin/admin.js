@@ -15,6 +15,7 @@ const {
 const { readRequiredSecret } = require("../src/local-reference-app");
 
 const DATA_COMMANDS = new Set(["export", "verify", "restore-validate", "restore-replace"]);
+const ARCHIVE_ONLY_COMMANDS = new Set(["verify-archive"]);
 
 function usage() {
   process.stderr.write(
@@ -22,6 +23,7 @@ function usage() {
       "Usage:",
       "  npm run admin -- export <archive.json>",
       "  npm run admin -- verify",
+      "  npm run admin -- verify-archive <archive.json>",
       "  npm run admin -- restore-validate <archive.json>",
       "  npm run admin -- restore-replace <archive.json> --confirm-replace",
       "  npm run admin -- issue-capability <expires-at-unix-seconds> <scope> [scope...]",
@@ -145,6 +147,28 @@ function parseExpiry(value) {
 
 async function run(argv = process.argv.slice(2), environment = process.env) {
   const [command, ...arguments_] = argv;
+  if (ARCHIVE_ONLY_COMMANDS.has(command)) {
+    const [filename] = arguments_;
+    if (arguments_.length !== 1) {
+      usage();
+      throw new Error("verify-archive has invalid arguments");
+    }
+    const archive = verifyRelayArchive(readArchive(filename));
+    process.stdout.write(
+      `${JSON.stringify({
+        command,
+        result: {
+          version: archive.version,
+          exportedAt: archive.exportedAt,
+          entries: archive.candidateSnapshot.entries.length,
+          coverage: archive.candidateSnapshot.coverage.length,
+          blobs: archive.blobs.length,
+          digest: archive.digest
+        }
+      })}\n`
+    );
+    return;
+  }
   if (DATA_COMMANDS.has(command)) {
     const [filename, confirmation] = arguments_;
     if (command === "restore-replace" && confirmation !== "--confirm-replace") {
