@@ -12,7 +12,7 @@ source "${script_directory}/common.sh"
 
 readonly BETA_CONFIRMATION="I_UNDERSTAND_HOME_FUNNEL_BETA_IS_NOT_SLO_COMPLIANT"
 
-require_command chmod chown curl docker git install od realpath sed tr
+require_command chmod chown curl docker git install realpath sed tr
 require_runtime_configuration
 require_var FNS_RELAY_HOME_BETA_CONFIRM FNS_RELAY_HOME_BETA_ROOT FNS_RELAY_NODE_IMAGE FNS_RELAY_EDGE_IMAGE FNS_RELAY_SOURCE_DIR
 [[ "$FNS_RELAY_HOME_BETA_CONFIRM" == "$BETA_CONFIRMATION" ]] \
@@ -80,16 +80,6 @@ ensure_directory "$FNS_RELAY_SECRETS_DIR" 0700
 ensure_operator_private_directory "$FNS_RELAY_EVIDENCE_DIR"
 ensure_operator_private_directory "$FNS_RELAY_DRILL_ROOT"
 
-capability_pepper="${FNS_RELAY_SECRETS_DIR}/capability-pepper"
-cursor_secret="${FNS_RELAY_SECRETS_DIR}/cursor-secret"
-if [[ ! -e "$capability_pepper" && ! -e "$cursor_secret" ]]; then
-  umask 077
-  od -An -N 48 -tx1 /dev/urandom | tr --delete ' \n' >"$capability_pepper"
-  od -An -N 48 -tx1 /dev/urandom | tr --delete ' \n' >"$cursor_secret"
-elif [[ ! -f "$capability_pepper" || ! -f "$cursor_secret" ]]; then
-  fail "both Relay secret files must exist together; refusing a partial secret reset"
-fi
-
 docker pull "$FNS_RELAY_NODE_IMAGE" >/dev/null
 docker pull "$FNS_RELAY_EDGE_IMAGE" >/dev/null
 docker build \
@@ -119,15 +109,44 @@ done
 for directory in "$FNS_RELAY_ARCHIVE_STAGING_DIR" "$FNS_RELAY_VERIFIED_ARCHIVE_DIR"; do
   set_service_directory_owner "$directory" 0700
 done
-docker run --rm --network none --read-only --user 0:0 --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
-  --security-opt no-new-privileges=true \
-  --mount "type=bind,source=${FNS_RELAY_SECRETS_DIR},target=/secrets" \
-  --entrypoint /bin/sh "$FNS_RELAY_IMAGE" -ec '
-chown 0:10001 /secrets
-chmod 0710 /secrets
-chown 0:10001 /secrets/capability-pepper /secrets/cursor-secret
-chmod 0440 /secrets/capability-pepper /secrets/cursor-secret
+
+# The ordinary beta operator deliberately cannot traverse the root-owned
+# secrets directory after the first run. Check/create both files only inside
+# this no-network, capability-limited helper so re-runs do not mistake hidden
+# files for a missing secret pair.
+initialize_secret_files() {
+  docker run --rm --network none --read-only --user 0:0 --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
+    --security-opt no-new-privileges=true \
+    --mount "type=bind,source=${FNS_RELAY_SECRETS_DIR},target=/secrets" \
+    --entrypoint node "$FNS_RELAY_IMAGE" -e '
+const crypto = require("crypto");
+const fs = require("fs");
+const directory = "/secrets";
+const files = ["capability-pepper", "cursor-secret"].map((name) => `${directory}/${name}`);
+function isRegularFileOrMissing(filename) {
+  try {
+    if (!fs.lstatSync(filename).isFile()) throw new Error(`Relay secret must be a regular file: ${filename}`);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+const present = files.map(isRegularFileOrMissing);
+if (!present[0] && !present[1]) {
+  for (const filename of files) fs.writeFileSync(filename, crypto.randomBytes(48).toString("hex"), { mode: 0o440 });
+} else if (!present[0] || !present[1]) {
+  throw new Error("both Relay secret files must exist together; refusing a partial secret reset");
+}
+for (const filename of files) {
+  fs.chownSync(filename, 0, 10001);
+  fs.chmodSync(filename, 0o440);
+}
+fs.chownSync(directory, 0, 10001);
+fs.chmodSync(directory, 0o710);
 '
+}
+initialize_secret_files
 
 ensure_operator_private_directory "$FNS_RELAY_EVIDENCE_DIR"
 build_record="${FNS_RELAY_EVIDENCE_DIR}/image-build-${revision}.json"
