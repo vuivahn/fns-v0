@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "better-sqlite3": "12.4.1",
-    "fns-v0-validator": "0.1.0"
+    "fns-v0-validator": "0.11.0"
   },
   "repository": {
     "type": "git",
