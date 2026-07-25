@@ -26,6 +26,26 @@ server {
     return 404;
   }
 
+  # Static FNS content served directly by the edge (not proxied to Relay):
+  # alice's page and the service-descriptor sidecar. Read-only bind mount
+  # -> /srv/fns-static (see FNS_RELAY_STATIC_DIR in compose.funnel.yaml).
+  location = /alice {
+    return 301 /alice/;
+  }
+
+  location /alice/ {
+    alias /srv/fns-static/alice/;
+    index index.html;
+    default_type text/html;
+    autoindex off;
+  }
+
+  location /fns-descriptors/ {
+    alias /srv/fns-static/fns-descriptors/;
+    default_type application/json;
+    autoindex off;
+  }
+
   location = /v1/publications {
     limit_req zone=relay_publication burst=10 nodelay;
     proxy_pass http://relay:8080;

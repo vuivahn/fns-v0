@@ -77,6 +77,15 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # Static FNS content (alice's page + descriptor sidecar). The host dir
+      # MUST exist and be readable by uid/gid 101:101 before the edge starts,
+      # otherwise the edge fails to come up and the public Funnel goes down.
+      - type: bind
+        source: ${FNS_RELAY_STATIC_DIR:-/opt/fns-relay/static}
+        target: /srv/fns-static
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       loopback:
         # The edge, not Relay, must use the non-internal network as its

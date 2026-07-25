@@ -1,0 +1,50 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>alice @ fns:alice</title>
+    <style>
+      body {
+        font:
+          16px/1.6 system-ui,
+          sans-serif;
+        margin: 0;
+        padding: 40px;
+        max-width: 640px;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin-bottom: 0.25em;
+      }
+      .addr {
+        font-family: ui-monospace, monospace;
+        background: #f3f3f3;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      p.sub {
+        color: #666;
+        margin-top: 0;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>alice</h1>
+    <p class="sub">This page is addressed by <span class="addr">fns:alice</span>.</p>
+    <p>
+      It is served from the home-server Funnel and loaded by the FNS resolver browser extension: the extension resolved
+      the alias to alice's Ed25519 subject key, fetched alice's signed service descriptor, verified the descriptor
+      signature in the browser, and opened this https endpoint.
+    </p>
+    <p>
+      The endpoint itself is not proof of ownership; the service descriptor cryptographically attests that alice's key
+      claims this endpoint.
+    </p>
+  </body>
+</html>
