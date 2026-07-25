@@ -182,9 +182,10 @@ make_secret() {
 }
 
 make_object_id() {
-  local suffix
-  suffix="$(printf '%s' "${run_id}:$1" | sha256sum | awk '{print $1}' | cut --characters=1-43 | tr '[:lower:]' '[:upper:]')"
-  printf 'fns:obj:sha256:%s' "$suffix"
+  local digest
+  digest="$(printf '%s' "${run_id}:$1" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr --delete '=')"
+  [[ "$digest" =~ ^[A-Za-z0-9_-]{43}$ ]] || fail "could not derive a canonical smoke ObjectId"
+  printf 'fns:obj:sha256:%s' "$digest"
 }
 
 install --directory --owner root --group root --mode 0700 "$smoke_root" "$smoke_root/runs" "$evidence_directory"

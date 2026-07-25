@@ -158,6 +158,7 @@ for (const expected of [
   "relay_internal_status",
   "wait_for_relay_ready",
   "wait_for_edge_ready",
+  "openssl dgst -sha256 -binary",
   "archive.sh",
   "restore-replace",
   "bad-permissions",
