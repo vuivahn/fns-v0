@@ -300,6 +300,78 @@ sudo -E bash /opt/fns-relay/bin/restore-drill.sh
 That path verifies the downloaded remote checksum, manifest, archive contract,
 and recovered image metadata without reading a primary-host archive directory.
 
+## Recovery host (independent new-location drill)
+
+The primary-host drill restores from a copy that the same host wrote, so it
+cannot prove recovery across a provider loss. A separate recovery host in an
+independent failure domain runs the same `restore-drill.sh` against the
+off-provider remote plus a five-minute anonymous public read probe
+(`probe-public.sh`). It has no production Relay data paths, capability DB, or
+secrets — only a recovery-scoped, read-only `rclone` credential for the same
+encrypted remote, an alert receiver, and append-only local evidence.
+
+Copy `recovery.env.example` to `/etc/fns-relay/recovery.env` on the recovery
+host, replace every example value, and protect it as root-owned. The alert
+webhook URL (and optional bearer token) live in separate root-only files named
+in `recovery.env`, never in the environment file itself. Provision a
+recovery-scoped `rclone` `crypt` config with a read-only credential for the
+primary host's encrypted remote.
+
+```sh
+sudo install --directory --mode 0750 /etc/fns-relay /opt/fns-relay
+sudo install --mode 0640 --owner root --group root recovery.env.example /etc/fns-relay/recovery.env
+sudo install --directory --mode 0700 /etc/fns-relay/off-provider /etc/fns-relay/alerts
+set -a
+. /etc/fns-relay/recovery.env
+set +a
+sudo -E bash /opt/fns-relay/bin/initialize-recovery-host.sh
+```
+
+`initialize-recovery-host.sh` creates only the evidence and drill-root
+directories with root-only ownership and modes; it never generates or copies
+secret material. Install the recovery units and timers from `systemd/` after
+adapting their absolute paths to the recovery-host layout:
+
+```sh
+sudo install --mode 0644 /opt/fns-relay/systemd/fns-relay-recovery-restore-drill.service \
+  /opt/fns-relay/systemd/fns-relay-recovery-restore-drill.timer \
+  /opt/fns-relay/systemd/fns-relay-recovery-public-probe.service \
+  /opt/fns-relay/systemd/fns-relay-recovery-public-probe.timer \
+  /opt/fns-relay/systemd/fns-relay-alert@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fns-relay-recovery-restore-drill.timer \
+  fns-relay-recovery-public-probe.timer
+```
+
+- `fns-relay-recovery-restore-drill.timer` runs weekly (Sun 04:30, with up to
+  30 min jitter). It selects the latest off-provider receipt (or an
+  explicitly named archive), downloads and verifies checksum/manifest/archive
+  digest, rebuilds a temporary Relay image from the manifest's immutable
+  source offer and pinned Node digest, restores into fresh drill directories
+  with new non-production secrets, starts an isolated loopback Relay, verifies
+  readiness and an anonymous object read, and records elapsed-time evidence.
+  It fails the four-hour RTO target if it cannot finish in time.
+- `fns-relay-recovery-public-probe.timer` runs every five minutes from boot.
+  It independently fetches the public `/.well-known/fns-source` offer and one
+  operator-selected anonymous object read, so transport-level reachability is
+  observed from outside the primary failure domain rather than from the Relay
+  host itself.
+- Both recovery units, like every one-shot job, are wired
+  `OnFailure=fns-relay-alert@%n.service`, which emits a credential-free failure
+  event to the recovery host's alert receiver and writes an `alert-*.json`
+  evidence record. `fns-relay-alert@.service` reads either `relay.env` or
+  `recovery.env`, so the same template unit serves both hosts.
+
+The primary-host `check-slos.sh` enforces the SLO against the primary host's
+own evidence (archive age ≤ 1 h, off-provider receipt ≤ 24 h, weekly restore
+drill success, container health + `/readyz`). The recovery host does not feed
+that checker — it has its own evidence directory and its own `OnFailure`
+alerting. The two are complementary, not cross-referenced by one job: the
+primary drill proves restore from a copy the same host wrote, and the
+recovery-host drill + public probe prove the same boundary from an independent
+failure domain. Do not run the primary-host and recovery-host timers on the
+same machine — independence is the property being evidenced.
+
 ## What is still platform-owned
 
 The repository can now provide the reference deployment automation, but an

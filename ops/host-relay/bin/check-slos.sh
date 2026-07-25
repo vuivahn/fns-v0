@@ -6,9 +6,17 @@ set -euo pipefail
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_directory}/common.sh"
 
-require_command cut docker find head sed sort stat timeout
+require_root
+require_command cat chmod cut date docker find head mv sed sort stat timeout tr
 require_runtime_configuration
+require_var FNS_RELAY_ACTIVE_PROFILE
 require_existing_directory "$FNS_RELAY_VERIFIED_ARCHIVE_DIR" "$FNS_RELAY_EVIDENCE_DIR"
+
+case "$FNS_RELAY_ACTIVE_PROFILE" in
+  direct) ;;
+  funnel) bash "${script_directory}/funnel.sh" verify >/dev/null ;;
+  *) fail "FNS_RELAY_ACTIVE_PROFILE must be direct or funnel" ;;
+esac
 
 latest_by_name() {
   local pattern="$1"
@@ -56,5 +64,11 @@ request.setTimeout(2000, () => {
   process.exit(1);
 });
 ' || fail "Relay container is not ready"
-printf '{"kind":"slo-check","checkedAt":"%s","archiveAgeSeconds":%s,"offProviderAgeSeconds":%s,"restoreAgeSeconds":%s,"restoreStatus":"%s"}\n' \
-  "$(utc_now)" "$archive_age" "$off_provider_age" "$restore_age" "$restore_status"
+
+evidence_file="${FNS_RELAY_EVIDENCE_DIR}/slo-$(utc_compact | tr '[:upper:]' '[:lower:]')-$$.json"
+temporary_evidence="${evidence_file}.tmp"
+printf '{"kind":"slo-check","status":"success","checkedAt":"%s","archiveAgeSeconds":%s,"offProviderAgeSeconds":%s,"restoreAgeSeconds":%s,"restoreStatus":"%s","relayHealth":"%s"}\n' \
+  "$(utc_now)" "$archive_age" "$off_provider_age" "$restore_age" "$restore_status" "$relay_health" >"$temporary_evidence"
+chmod 0600 "$temporary_evidence"
+mv -- "$temporary_evidence" "$evidence_file"
+cat "$evidence_file"

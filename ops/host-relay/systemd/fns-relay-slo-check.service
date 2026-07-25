@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [Unit]
 Description=FNS Relay recovery-objective and readiness check
-After=fns-relay.service
-Requires=fns-relay.service
+# Do not tie this to the direct-TLS service. Funnel and direct-TLS profiles
+# share the same Relay container name but must never be started together.
+After=docker.service
+Requires=docker.service
+OnFailure=fns-relay-alert@%n.service
 
 [Service]
 Type=oneshot

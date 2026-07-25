@@ -7,7 +7,7 @@ script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_directory}/common.sh"
 
 require_root
-require_command cat rclone sha256sum install
+require_command cat mktemp rclone sha256sum install
 require_runtime_configuration
 require_var FNS_RELAY_RCLONE_CONFIG FNS_RELAY_OFF_PROVIDER_REMOTE
 require_safe_absolute_path FNS_RELAY_RCLONE_CONFIG
@@ -39,8 +39,11 @@ remote_manifest_sha256="$(rclone cat "${remote_prefix}/$(basename -- "$manifest"
 [[ "$remote_manifest_sha256" == "$(sha256_of "$manifest")" ]] || fail "off-provider manifest does not match"
 
 receipt="${FNS_RELAY_EVIDENCE_DIR}/off-provider-$(utc_compact).json"
+receipt_temp="$(mktemp "${FNS_RELAY_EVIDENCE_DIR}/.off-provider-receipt.XXXXXX")"
 printf '{"kind":"off-provider-copy","createdAt":"%s","archive":"%s","sha256":"%s"}\n' \
-  "$(utc_now)" "$archive_name" "$expected_sha256" >"$receipt"
+  "$(utc_now)" "$archive_name" "$expected_sha256" >"$receipt_temp"
+chmod 0600 "$receipt_temp"
+mv -- "$receipt_temp" "$receipt"
 rclone copyto --immutable "$receipt" "${remote_prefix}/receipts/$(basename -- "$receipt")"
 [[ "$(rclone cat "${remote_prefix}/receipts/$(basename -- "$receipt")" | sha256sum | awk '{print $1}')" == "$(sha256_of "$receipt")" ]] \
   || fail "off-provider receipt does not match"

@@ -67,7 +67,7 @@ done
 revision="$(git -C "$FNS_RELAY_SOURCE_DIR" rev-parse HEAD)"
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || fail "source checkout must resolve to a full lowercase Git revision"
 source_offer="https://github.com/vuivahn/fns-v0/archive/${revision}.tar.gz"
-curl --fail --silent --show-error --location --head "$source_offer" >/dev/null
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --head "$source_offer" >/dev/null
 
 ensure_directory "$beta_root" 0700
 for directory in "$FNS_RELAY_CANDIDATE_DIR" "$FNS_RELAY_BLOB_DIR" "$FNS_RELAY_CAPABILITY_DIR"; do

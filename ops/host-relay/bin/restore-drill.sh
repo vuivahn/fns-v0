@@ -7,24 +7,12 @@ script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_directory}/common.sh"
 
 require_root
-require_command curl docker install od rclone sed seq sha256sum tar tr
-require_runtime_configuration
+require_command curl docker install od rclone sed seq sha256sum sort tail tar tr
+require_recovery_configuration
 require_var FNS_RELAY_RCLONE_CONFIG FNS_RELAY_OFF_PROVIDER_REMOTE
 require_safe_absolute_path FNS_RELAY_RCLONE_CONFIG
 require_existing_file "$FNS_RELAY_RCLONE_CONFIG"
 require_existing_directory "$FNS_RELAY_EVIDENCE_DIR" "$FNS_RELAY_DRILL_ROOT"
-
-receipt_sha256=""
-if [[ -n "${FNS_RELAY_RESTORE_ARCHIVE_NAME:-}" ]]; then
-  archive_name="$FNS_RELAY_RESTORE_ARCHIVE_NAME"
-else
-  receipt="$(latest_off_provider_receipt)"
-  [[ -n "$receipt" ]] || fail "no off-provider copy receipt is available; set FNS_RELAY_RESTORE_ARCHIVE_NAME for a recovery host"
-  archive_name="$(archive_name_from_manifest "$receipt")"
-  receipt_sha256="$(archive_sha256_from_manifest "$receipt")"
-  [[ "$receipt_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "off-provider receipt has an invalid archive checksum"
-fi
-[[ "$archive_name" =~ ^relay-[0-9]{8}T[0-9]{6}Z\.json$ ]] || fail "restore archive name is invalid"
 
 started_epoch="$(date +%s)"
 run_id="restore-$(utc_compact | tr '[:upper:]' '[:lower:]')-$$"
@@ -39,6 +27,9 @@ evidence_file="${FNS_RELAY_EVIDENCE_DIR}/${run_id}.json"
 drill_status="failed"
 object_read="not-attempted"
 recovery_image=""
+archive_name="unknown"
+receipt_sha256=""
+receipt_origin="not-selected"
 
 finish() {
   local exit_code="$1"
@@ -47,8 +38,13 @@ finish() {
   elapsed="$((ended_epoch - started_epoch))"
   docker rm --force "$container_name" >/dev/null 2>&1 || true
   if [[ -n "$recovery_image" ]]; then docker image rm --force "$recovery_image" >/dev/null 2>&1 || true; fi
-  printf '{"kind":"restore-drill","status":"%s","createdAt":"%s","archive":"%s","elapsedSeconds":%s,"objectRead":"%s"}\n' \
-    "$drill_status" "$(utc_now)" "$archive_name" "$elapsed" "$object_read" >"$evidence_file"
+  # The compact evidence file is the durable record; the per-run scratch tree
+  # (downloaded archive, extracted source, restored data, throwaway secrets) is
+  # disposable. Remove it so the weekly timer cannot slowly fill the drill root
+  # and silently break the RTO SLO.
+  rm -rf -- "$run_root"
+  printf '{"kind":"restore-drill","status":"%s","createdAt":"%s","archive":"%s","receiptOrigin":"%s","elapsedSeconds":%s,"objectRead":"%s"}\n' \
+    "$drill_status" "$(utc_now)" "$archive_name" "$receipt_origin" "$elapsed" "$object_read" >"$evidence_file"
   exit "$exit_code"
 }
 trap 'exit_code=$?; trap - EXIT; finish "$exit_code"' EXIT
@@ -62,6 +58,28 @@ install --directory --owner root --group "$FNS_RELAY_RUNTIME_GID" --mode 0710 "$
 
 export RCLONE_CONFIG="$FNS_RELAY_RCLONE_CONFIG"
 remote_prefix="${FNS_RELAY_OFF_PROVIDER_REMOTE%/}"
+if [[ -n "${FNS_RELAY_RESTORE_ARCHIVE_NAME:-}" ]]; then
+  archive_name="$FNS_RELAY_RESTORE_ARCHIVE_NAME"
+  receipt_origin="explicit"
+else
+  receipt="$(latest_off_provider_receipt)"
+  if [[ -n "$receipt" ]]; then
+    receipt_origin="local"
+  else
+    remote_receipt_names="$(rclone lsf --files-only "${remote_prefix}/receipts")"
+    remote_receipt_name="$(printf '%s\n' "$remote_receipt_names" | sed --quiet 's/^\(off-provider-[0-9]\{8\}T[0-9]\{6\}Z\.json\)$/\1/p' | sort | tail --lines 1)"
+    [[ -n "$remote_receipt_name" ]] || fail "no valid off-provider receipt is available locally or on the remote"
+    receipt="${archive_directory}/${remote_receipt_name}"
+    rclone copyto "${remote_prefix}/receipts/${remote_receipt_name}" "$receipt"
+    chown "root:${FNS_RELAY_RUNTIME_GID}" "$receipt"
+    chmod 0440 "$receipt"
+    receipt_origin="remote"
+  fi
+  archive_name="$(archive_name_from_manifest "$receipt")"
+  receipt_sha256="$(archive_sha256_from_manifest "$receipt")"
+  [[ "$receipt_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "off-provider receipt has an invalid archive checksum"
+fi
+[[ "$archive_name" =~ ^relay-[0-9]{8}T[0-9]{6}Z\.json$ ]] || fail "restore archive name is invalid"
 for artifact in "$archive_name" "${archive_name}.sha256" "${archive_name%.json}.manifest.json"; do
   rclone copyto "${remote_prefix}/${artifact}" "${archive_directory}/${artifact}"
   chown "root:${FNS_RELAY_RUNTIME_GID}" "${archive_directory}/${artifact}"
@@ -91,7 +109,7 @@ node_image="$(node_image_from_manifest "$downloaded_manifest")"
 source_directory="${run_root}/source"
 recovery_image="fns-relay-recovery-${run_id}"
 install --directory --owner root --group root --mode 0700 "$source_directory"
-curl --fail --silent --show-error --location "$source_offer" \
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$source_offer" \
   | tar --extract --gzip --strip-components=1 --directory "$source_directory"
 docker build \
   --file "${source_directory}/Dockerfile.relay" \
