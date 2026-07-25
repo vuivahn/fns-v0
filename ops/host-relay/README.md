@@ -150,7 +150,9 @@ LetsEncrypt's `live/` symlinks is insufficient. The supplied Nginx image runs
 as UID/GID `101`; make those two files and their parent directory readable by
 that group, while keeping them non-writable from the container. The edge has
 only `NET_BIND_SERVICE` in addition to its non-root identity so it can bind
-ports 80/443.
+ports 80/443. Its root filesystem remains read-only: only `/run`, the
+template output directory, and Nginx's cache directory are UID/GID `101`
+tmpfs mounts.
 
 ## Backup, off-provider copy, and restore evidence
 

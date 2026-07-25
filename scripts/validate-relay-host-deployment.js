@@ -43,6 +43,14 @@ if (relayService.includes("ports:") || relayService.includes("- public"))
   failures.push("ops/host-relay/compose.yaml must keep Relay off host ports and the public network");
 if (!edgeService.includes("- public") || !edgeService.includes("- relay"))
   failures.push("ops/host-relay/compose.yaml must attach edge to both public and private networks");
+for (const expected of [
+  "/etc/nginx/conf.d:rw,nosuid,nodev,noexec,size=1m,mode=0750,uid=101,gid=101",
+  "/var/cache/nginx:rw,nosuid,nodev,noexec,size=16m,mode=0750,uid=101,gid=101",
+  "/run:rw,nosuid,nodev,noexec,size=1m,mode=0750,uid=101,gid=101"
+])
+  requireText("ops/host-relay/compose.yaml", edgeService, expected);
+if (edgeService.includes("/var/run:"))
+  failures.push("ops/host-relay/compose.yaml must mount /run, not the /var/run symlink");
 if (!composeNetworks.includes("relay:\n    internal: true") || !composeNetworks.includes("public: {}"))
   failures.push("ops/host-relay/compose.yaml must define an internal Relay network and a public edge network");
 if (compose.includes("FNS_RELAY_PROBE_PORT"))
