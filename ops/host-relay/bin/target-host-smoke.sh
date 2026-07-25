@@ -118,10 +118,27 @@ smoke_compose() {
     "$@"
 }
 
-wait_for_direct_ready() {
+relay_internal_status() {
+  local pathname="$1"
+  timeout 5s docker exec --user "${SMOKE_RUNTIME_UID}:${SMOKE_RUNTIME_GID}" "$relay_container" node -e '
+const http = require("http");
+const pathname = process.argv[1];
+const request = http.get({ host: "127.0.0.1", port: 8080, path: pathname }, (response) => {
+  response.resume();
+  process.exit(response.statusCode === 200 ? 0 : 1);
+});
+request.on("error", () => process.exit(1));
+request.setTimeout(2000, () => {
+  request.destroy();
+  process.exit(1);
+});
+' "$pathname"
+}
+
+wait_for_relay_ready() {
   local deadline="$(($(date +%s) + 60))"
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    if curl --fail --silent --show-error --noproxy 127.0.0.1 --output /dev/null "http://127.0.0.1:${probe_port}/readyz"; then
+    if relay_internal_status /readyz; then
       return 0
     fi
     sleep 1
@@ -229,8 +246,10 @@ compose_started=true
   || fail "smoke Relay is not configured to run as UID/GID 10001"
 [[ "$(docker inspect "$relay_container" --format '{{.HostConfig.ReadonlyRootfs}}')" == "true" ]] \
   || fail "smoke Relay root filesystem is not read-only"
-wait_for_direct_ready
-curl --fail --silent --show-error --noproxy 127.0.0.1 --output /dev/null "http://127.0.0.1:${probe_port}/healthz"
+[[ "$(docker port "$relay_container" 8080/tcp)" == "127.0.0.1:${probe_port}" ]] \
+  || fail "smoke Relay probe port is not bound privately to 127.0.0.1:${probe_port}"
+wait_for_relay_ready
+relay_internal_status /healthz
 [[ "$(edge_status /healthz "${responses_directory}/edge-health.json")" == "404" ]] || fail "edge must not expose /healthz"
 [[ "$(edge_status /readyz "${responses_directory}/edge-ready.json")" == "404" ]] || fail "edge must not expose /readyz"
 
@@ -279,7 +298,7 @@ smoke_compose stop --timeout 12 relay
 [[ "$(docker inspect "$relay_container" --format '{{.State.ExitCode}}')" == "0" ]] \
   || fail "Relay did not exit cleanly after SIGTERM"
 smoke_compose up --detach --no-deps relay
-wait_for_direct_ready
+wait_for_relay_ready
 [[ "$(edge_status "/v1/objects/${binding_a}" "${responses_directory}/restart-object.json")" == "200" ]] \
   || fail "candidate/blob did not survive Relay restart"
 
