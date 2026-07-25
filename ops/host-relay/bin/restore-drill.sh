@@ -122,7 +122,7 @@ docker run --rm --network none "${FNS_RELAY_HARDENED_ARGS[@]}" \
   --entrypoint node "$recovery_image" relay-v1/apps/public-relay/bin/admin.js verify >/dev/null
 
 for secret_name in capability-pepper cursor-secret; do
-  od --an --read-bytes=48 --format=x1 /dev/urandom | tr --delete ' \n' >"${secrets_directory}/${secret_name}"
+  od -An -N 48 -tx1 /dev/urandom | tr --delete ' \n' >"${secrets_directory}/${secret_name}"
   chown "root:${FNS_RELAY_RUNTIME_GID}" "${secrets_directory}/${secret_name}"
   chmod 0440 "${secrets_directory}/${secret_name}"
 done

@@ -125,6 +125,14 @@ for (const expected of [
 ])
   requireText("ops/host-relay/bin/target-host-smoke.sh", hostSmoke, expected);
 
+for (const [relativePath, script] of [
+  ["ops/host-relay/bin/restore-drill.sh", drill],
+  ["ops/host-relay/bin/target-host-smoke.sh", hostSmoke]
+]) {
+  if (script.includes("od --an")) failures.push(`${relativePath} must use portable od short options`);
+  requireText(relativePath, script, "od -An");
+}
+
 if (failures.length > 0) {
   process.stderr.write(
     `Relay Linux host deployment validation failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}\n`

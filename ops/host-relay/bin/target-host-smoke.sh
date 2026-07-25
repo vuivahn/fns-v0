@@ -51,7 +51,7 @@ done
 
 random_port() {
   local value
-  value="$(od --an --read-bytes=2 --format=u2 /dev/urandom | tr --delete ' ')"
+  value="$(od -An -N 2 -tu2 /dev/urandom | tr --delete ' ')"
   printf '%s' "$((20000 + value % 20000))"
 }
 
@@ -149,7 +149,7 @@ admin_capability() {
 
 make_secret() {
   local target="$1"
-  od --an --read-bytes=48 --format=x1 /dev/urandom | tr --delete ' \n' >"$target"
+  od -An -N 48 -tx1 /dev/urandom | tr --delete ' \n' >"$target"
   chown "root:${SMOKE_RUNTIME_GID}" "$target"
   chmod 0440 "$target"
 }
