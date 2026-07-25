@@ -31,6 +31,24 @@ require_existing_directory "$FNS_RELAY_SOURCE_DIR"
 beta_root="$(realpath --canonicalize-missing "$FNS_RELAY_HOME_BETA_ROOT")"
 require_safe_absolute_path beta_root
 [[ "$beta_root" != / ]] || fail "FNS_RELAY_HOME_BETA_ROOT must not be /"
+
+# A successful run deliberately makes Relay data service-owned and secrets
+# root-owned. Re-running as the ordinary home-server operator must therefore
+# not attempt a host chmod on existing directories; later, narrowly-scoped
+# Docker helpers enforce the service-owned paths they are responsible for.
+ensure_directory() {
+  local directory="$1" mode="$2"
+  if [[ -d "$directory" ]]; then return 0; fi
+  [[ ! -e "$directory" ]] || fail "expected a directory but found another path: ${directory}"
+  install --directory --mode "$mode" "$directory"
+}
+
+ensure_operator_private_directory() {
+  local directory="$1"
+  ensure_directory "$directory" 0700
+  chmod 0700 "$directory" || fail "operator must retain control of beta directory: ${directory}"
+}
+
 for configured_path in \
   "$FNS_RELAY_CANDIDATE_DIR" \
   "$FNS_RELAY_BLOB_DIR" \
@@ -51,16 +69,16 @@ revision="$(git -C "$FNS_RELAY_SOURCE_DIR" rev-parse HEAD)"
 source_offer="https://github.com/vuivahn/fns-v0/archive/${revision}.tar.gz"
 curl --fail --silent --show-error --location --head "$source_offer" >/dev/null
 
-install --directory --mode 0700 "$beta_root"
+ensure_directory "$beta_root" 0700
 for directory in "$FNS_RELAY_CANDIDATE_DIR" "$FNS_RELAY_BLOB_DIR" "$FNS_RELAY_CAPABILITY_DIR"; do
-  install --directory --mode 0750 "$directory"
+  ensure_directory "$directory" 0750
 done
 for directory in "$FNS_RELAY_ARCHIVE_STAGING_DIR" "$FNS_RELAY_VERIFIED_ARCHIVE_DIR"; do
-  install --directory --mode 0700 "$directory"
+  ensure_directory "$directory" 0700
 done
-for directory in "$FNS_RELAY_SECRETS_DIR" "$FNS_RELAY_EVIDENCE_DIR" "$FNS_RELAY_DRILL_ROOT"; do
-  install --directory --mode 0700 "$directory"
-done
+ensure_directory "$FNS_RELAY_SECRETS_DIR" 0700
+ensure_operator_private_directory "$FNS_RELAY_EVIDENCE_DIR"
+ensure_operator_private_directory "$FNS_RELAY_DRILL_ROOT"
 
 capability_pepper="${FNS_RELAY_SECRETS_DIR}/capability-pepper"
 cursor_secret="${FNS_RELAY_SECRETS_DIR}/cursor-secret"
@@ -111,7 +129,7 @@ chown 0:10001 /secrets/capability-pepper /secrets/cursor-secret
 chmod 0440 /secrets/capability-pepper /secrets/cursor-secret
 '
 
-install --directory --mode 0700 "$FNS_RELAY_EVIDENCE_DIR"
+ensure_operator_private_directory "$FNS_RELAY_EVIDENCE_DIR"
 build_record="${FNS_RELAY_EVIDENCE_DIR}/image-build-${revision}.json"
 current_record="${FNS_RELAY_EVIDENCE_DIR}/current-image-build.json"
 if [[ -e "$build_record" ]]; then

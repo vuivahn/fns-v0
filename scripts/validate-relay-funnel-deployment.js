@@ -158,6 +158,8 @@ for (const expected of [
   "I_UNDERSTAND_HOME_FUNNEL_BETA_IS_NOT_SLO_COMPLIANT",
   "FNS_RELAY_HOME_BETA_ROOT",
   "all beta runtime paths must stay below",
+  "ensure_directory()",
+  "operator must retain control of beta directory",
   "--network none",
   "--cap-add CHOWN",
   "home-funnel-beta-image-build",
