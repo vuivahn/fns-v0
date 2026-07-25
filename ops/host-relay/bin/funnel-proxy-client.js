@@ -75,7 +75,10 @@ const request = Buffer.concat([proxyHeader, Buffer.from(`${headers.join("\r\n")}
 
 const response = [];
 let finished = false;
-const socket = net.createConnection({ host: options.host, port }, () => socket.end(request));
+// Keep the write half open until the HTTP peer closes. Nginx treats an early
+// FIN after a request body as a client-aborted upload (499), even when every
+// byte in Content-Length reached the socket.
+const socket = net.createConnection({ host: options.host, port }, () => socket.write(request));
 socket.setTimeout(5000, () => socket.destroy(new Error("request timed out")));
 socket.on("data", (chunk) => response.push(chunk));
 socket.on("error", (error) => {

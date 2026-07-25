@@ -126,9 +126,12 @@ for (const expected of [
   "proxyHeader[12] = 0x21",
   "proxyHeader[13] = 0x11",
   "Connection: close",
+  "socket.write(request)",
   "upstream closed without an HTTP response"
 ])
   requireText(clientPath, client, expected);
+if (client.includes("socket.end(request)"))
+  failures.push(`${clientPath} must not send an early FIN before a request body is proxied`);
 
 const smokePath = "ops/host-relay/bin/target-host-funnel-smoke.sh";
 const smoke = read(smokePath);
