@@ -79,6 +79,10 @@ async function runStoreReadConformance({ store, source, snapshot, label = "store
     false
   );
 
+  // malformed-addressable: an object the FNS validator would reject must still
+  // be retrievable through the read-only store; the store never decides validity.
+  assert.deepStrictEqual((await store.getObject(unindexed)).object, { arbitrary: ["malformed"] });
+
   const fetched = await store.getObject(bindingA);
   fetched.object.payload.alias = "changed";
   assert.strictEqual((await store.getObject(bindingA)).object.payload.alias, "alice");
