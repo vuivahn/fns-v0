@@ -113,6 +113,8 @@ for (const expected of [
   "--tls-terminated-tcp=",
   "tcp://127.0.0.1:",
   "tailscale funnel status --json",
+  "NetworkSettings.Ports",
+  "Funnel edge loopback port is not effective",
   "FNS_RELAY_FUNNEL_PUBLIC_PORT must be one of 443, 8443, or 10000"
 ])
   requireText(funnelPath, funnel, expected);

@@ -63,18 +63,24 @@ edge_status() {
 }
 
 verify_local_boundary() {
-  local relay_ports edge_port_bindings
+  local relay_ports edge_port_bindings edge_effective_port_bindings edge_ports
   relay_ready
   [[ "$(docker inspect --format '{{.State.Running}}' "$edge_container" 2>/dev/null)" == true ]] \
     || fail "Funnel edge is not running: ${edge_container}"
   relay_ports="$(docker port "$relay_container" 8080/tcp 2>/dev/null || true)"
   [[ -z "$relay_ports" ]] || fail "Relay must not publish port 8080 to the host"
-  # nginx's stock image exposes 80/443, not this profile's unprivileged 8080.
-  # Inspect the configured Docker binding directly; the following PROXY-v2
-  # requests prove the binding is live rather than relying on EXPOSE metadata.
+  # Require both Docker's declared and effective bindings. A container attached
+  # only to an internal network can retain the declaration without installing
+  # a reachable host port.
   edge_port_bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$edge_container")"
   [[ "$edge_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${FNS_RELAY_FUNNEL_EDGE_PORT}\"}"* ]] \
     || fail "Funnel edge must publish only 127.0.0.1:${FNS_RELAY_FUNNEL_EDGE_PORT}"
+  edge_effective_port_bindings="$(docker inspect --format '{{json .NetworkSettings.Ports}}' "$edge_container")"
+  [[ "$edge_effective_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${FNS_RELAY_FUNNEL_EDGE_PORT}\"}"* ]] \
+    || fail "Funnel edge loopback port is not effective"
+  edge_ports="$(docker port "$edge_container" 8080/tcp 2>/dev/null || true)"
+  [[ "$edge_ports" == "127.0.0.1:${FNS_RELAY_FUNNEL_EDGE_PORT}" ]] \
+    || fail "Funnel edge must expose exactly one effective loopback port"
   [[ "$(edge_status /healthz)" == 404 ]] || fail "Funnel edge must hide /healthz"
   [[ "$(edge_status /readyz)" == 404 ]] || fail "Funnel edge must hide /readyz"
 }
