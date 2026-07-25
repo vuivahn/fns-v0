@@ -77,6 +77,16 @@ function randomName(prefix) {
   return `${prefix}-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
 }
 
+function randomSecret() {
+  // readRequiredSecret intentionally removes one terminal LF/CRLF, so avoid
+  // choosing a value that would make this test's exact 32-byte fixture invalid.
+  let secret;
+  do {
+    secret = crypto.randomBytes(32);
+  } while (secret.at(-1) === 0x0a || secret.at(-1) === 0x0d);
+  return secret;
+}
+
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -156,6 +166,17 @@ async function waitForOk(baseUrl, pathname) {
     await wait(250);
   }
   throw new Error(`Relay did not become ready at ${pathname}: ${lastError?.message ?? "unknown error"}`);
+}
+
+async function waitForRelayReadiness(baseUrl, container, pathname = "/readyz") {
+  try {
+    return await waitForOk(baseUrl, pathname);
+  } catch (error) {
+    const state = docker(["inspect", container, "--format", "{{json .State}}"]).stdout.trim();
+    const logResult = docker(["logs", "--tail", "100", container]);
+    const logs = [logResult.stdout, logResult.stderr].filter(Boolean).join("\n").trim();
+    throw new Error(`${error.message}\n${container} state: ${state}\n${container} logs:\n${logs}`);
+  }
 }
 
 function publishedPort(container) {
@@ -393,10 +414,10 @@ async function main() {
   const badCandidateVolume = `${unique}-bad-candidates`;
   const badBlobVolume = `${unique}-bad-blobs`;
   const badCapabilityVolume = `${unique}-bad-capabilities`;
-  const pepper = crypto.randomBytes(32);
-  const cursorSecret = crypto.randomBytes(32);
-  const targetPepper = crypto.randomBytes(32);
-  const targetCursorSecret = crypto.randomBytes(32);
+  const pepper = randomSecret();
+  const cursorSecret = randomSecret();
+  const targetPepper = randomSecret();
+  const targetCursorSecret = randomSecret();
   try {
     process.stdout.write("Building public Relay image...\n");
     docker(
@@ -455,9 +476,9 @@ async function main() {
         secretVolume: sourceSecretVolume
       })
     );
-    const sourceBaseUrl = `http://127.0.0.1:${publishedPort(sourceContainer)}`;
-    await waitForOk(sourceBaseUrl, "/healthz");
-    const initialReadiness = await waitForOk(sourceBaseUrl, "/readyz");
+    let sourceBaseUrl = `http://127.0.0.1:${publishedPort(sourceContainer)}`;
+    await waitForRelayReadiness(sourceBaseUrl, sourceContainer, "/healthz");
+    const initialReadiness = await waitForRelayReadiness(sourceBaseUrl, sourceContainer);
     assert.strictEqual(initialReadiness.body.readiness.candidate.database, "ok");
     assert.strictEqual(initialReadiness.body.readiness.blobs.directory, "ok");
     assert.strictEqual(initialReadiness.body.readiness.capabilities.database, "ok");
@@ -619,8 +640,22 @@ async function main() {
     assert.strictEqual(validated.result.entries, 2);
     docker(["stop", "--time", "10", sourceContainer]);
     assert.strictEqual(docker(["inspect", sourceContainer, "--format", "{{.State.ExitCode}}"]).stdout.trim(), "0");
-    docker(["start", sourceContainer]);
-    await waitForOk(sourceBaseUrl, "/readyz");
+    // Recreate the serving container from the same persistent volumes. This is
+    // the real deployment-update shape and proves the data is not tied to a
+    // container writable layer or a retained stopped-container network state.
+    docker(["rm", sourceContainer]);
+    docker(
+      serviceArguments({
+        container: sourceContainer,
+        image,
+        candidateVolume: sourceCandidateVolume,
+        blobVolume: sourceBlobVolume,
+        capabilityVolume: sourceCapabilityVolume,
+        secretVolume: sourceSecretVolume
+      })
+    );
+    sourceBaseUrl = `http://127.0.0.1:${publishedPort(sourceContainer)}`;
+    await waitForRelayReadiness(sourceBaseUrl, sourceContainer);
     const persisted = await requestJson(sourceBaseUrl, "GET", `/v1/objects/${encodeURIComponent(bindingA)}`);
     assert.strictEqual(persisted.status, 200);
     assert.strictEqual(relayAdmin(sourceContainer, ["verify"]).report.blobs.blobs, 2);
@@ -666,7 +701,7 @@ async function main() {
       })
     );
     const targetBaseUrl = `http://127.0.0.1:${publishedPort(targetContainer)}`;
-    await waitForOk(targetBaseUrl, "/readyz");
+    await waitForRelayReadiness(targetBaseUrl, targetContainer);
     const restored = await requestJson(targetBaseUrl, "GET", `/v1/objects/${encodeURIComponent(bindingB)}`);
     assert.strictEqual(restored.status, 200);
     assert.strictEqual(relayAdmin(targetContainer, ["verify"]).report.blobs.blobs, 2);
