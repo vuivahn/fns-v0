@@ -30,8 +30,9 @@ Two independent layers, with a hard license/scope boundary between them:
   Korean.
 
 No build step. Plain CommonJS (`"type": "commonjs"`), Node `>=20`, depends on
-`better-sqlite3` and the frozen `fns-v0-validator` Core. ESLint 9 flat config,
-Prettier. CI runs the quality gate on Node 20/22/24.
+`better-sqlite3` and the frozen `fns-v0-validator` Core. ESLint 10 flat config
+(`@eslint/js` recommended rules), Prettier. CI runs the quality gate on Node
+20/22/24.
 
 ## Commands
 
