@@ -10,7 +10,10 @@ const path = require("path");
 const test = require("node:test");
 const { URL } = require("url");
 const { CursorCodec } = require("../relay-v1/apps/public-relay/src/cursor-codec");
-const { createLocalReferenceRelayApplication } = require("../relay-v1/apps/public-relay/src/local-reference-app");
+const {
+  createLocalReferenceRelayApplication,
+  readRequiredSecret
+} = require("../relay-v1/apps/public-relay/src/local-reference-app");
 const { createPublicRelayServer } = require("../relay-v1/apps/public-relay/src/server");
 const { RelayProtocolError } = require("../relay-v1/packages/relay-contract/src/errors");
 const { PUBLISH_SCOPE } = require("../relay-v1/packages/relay-local/src");
@@ -233,6 +236,8 @@ test("public Relay local profile requires isolated storage and secret configurat
   const directory = temporaryRelayDirectory();
   const secretDirectory = path.join(directory, "secrets");
   const invalidParent = path.join(directory, "not-a-directory");
+  const capabilityPepperFile = Buffer.alloc(32, 0x61);
+  const cursorSecretFile = Buffer.alloc(32, 0x62);
   const environment = {
     FNS_RELAY_CANDIDATES_DB: path.join(directory, "candidates.sqlite"),
     FNS_RELAY_CAPABILITY_DB: path.join(directory, "capabilities.sqlite"),
@@ -247,12 +252,9 @@ test("public Relay local profile requires isolated storage and secret configurat
     fs.mkdirSync(secretDirectory);
     fs.writeFileSync(
       path.join(secretDirectory, "capability-pepper"),
-      Buffer.concat([crypto.randomBytes(32), Buffer.from("\n")])
+      Buffer.concat([capabilityPepperFile, Buffer.from("\n")])
     );
-    fs.writeFileSync(
-      path.join(secretDirectory, "cursor-secret"),
-      Buffer.concat([crypto.randomBytes(32), Buffer.from("\n")])
-    );
+    fs.writeFileSync(path.join(secretDirectory, "cursor-secret"), Buffer.concat([cursorSecretFile, Buffer.from("\n")]));
     fs.writeFileSync(invalidParent, "not a directory");
     assert.throws(
       () =>
@@ -331,6 +333,34 @@ test("public Relay local profile requires isolated storage and secret configurat
     assert.strictEqual(typeof application.server.listen, "function");
   } finally {
     if (application) application.close();
+    removeTemporaryRelayDirectory(directory);
+  }
+});
+
+test("public Relay secret files trim one line ending without making raw secrets ambiguous", () => {
+  const directory = temporaryRelayDirectory();
+  const rawSecret = Buffer.alloc(32, 0x7a);
+  const rawSecretEndingInCr = Buffer.concat([Buffer.alloc(31, 0x7a), Buffer.from([0x0d])]);
+  const lfFilename = path.join(directory, "secret-lf");
+  const crlfFilename = path.join(directory, "secret-crlf");
+  const rawFilename = path.join(directory, "secret-raw");
+  try {
+    fs.writeFileSync(lfFilename, Buffer.concat([rawSecret, Buffer.from("\n")]));
+    fs.writeFileSync(crlfFilename, Buffer.concat([rawSecret, Buffer.from("\r\n")]));
+    fs.writeFileSync(rawFilename, rawSecretEndingInCr);
+    assert.deepStrictEqual(
+      readRequiredSecret({ FNS_RELAY_CURSOR_SECRET_FILE: lfFilename }, "FNS_RELAY_CURSOR_SECRET"),
+      rawSecret
+    );
+    assert.deepStrictEqual(
+      readRequiredSecret({ FNS_RELAY_CURSOR_SECRET_FILE: crlfFilename }, "FNS_RELAY_CURSOR_SECRET"),
+      rawSecret
+    );
+    assert.deepStrictEqual(
+      readRequiredSecret({ FNS_RELAY_CURSOR_SECRET_FILE: rawFilename }, "FNS_RELAY_CURSOR_SECRET"),
+      rawSecretEndingInCr
+    );
+  } finally {
     removeTemporaryRelayDirectory(directory);
   }
 });
