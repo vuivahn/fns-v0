@@ -22,6 +22,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "check": "npm run lint && npm run format:check",
     "check:host-relay": "node scripts/validate-relay-host-deployment.js",
+    "check:relay-funnel": "node scripts/validate-relay-funnel-deployment.js",
     "coverage": "c8 --all --include=src/**/*.js --include=relay-v1/**/src/**/*.js --check-coverage --lines 90 --statements 90 --functions 85 --branches 75 node --unhandled-rejections=strict --test test/store-interface.test.js test/sqlite-store.test.js test/relay-reference.test.js test/public-relay.test.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

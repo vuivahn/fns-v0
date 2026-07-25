@@ -107,6 +107,95 @@ parameterized only so `target-host-smoke.sh` can use isolated names and
 loopback high ports; production retains `fns-relay`, `fns-relay-edge`, and
 ports 80/443.
 
+## Tailscale Funnel home-server public beta
+
+`compose.funnel.yaml` is a separate profile for a public beta on a host that
+already uses ports `80/443`, such as a home server. It does not make this Relay
+canonical, default, trusted, or an FNS-wide dependency. Funnel is a beta,
+`ts.net`-addressed transport with provider-controlled bandwidth limits; keep a
+custom-domain VM edge as the long-term production option.
+
+```text
+Internet HTTPS :8443
+  -> Tailscale Funnel (TLS termination, PROXY protocol v2)
+  -> 127.0.0.1:18080 on the home server
+  -> Nginx Funnel edge :8080 (loopback bridge + private Relay network)
+  -> Relay :8080 (private Docker network only)
+```
+
+The default public port is `8443`, leaving the host's `80/443` owner untouched.
+The loopback edge accepts **only** PROXY protocol v2. This is deliberate:
+Tailscale forwards the original client address in that header, allowing Nginx
+to apply its read/publication rate limits per client instead of globally. Do
+not replace `$proxy_protocol_addr` with an untrusted forwarded header and do
+not publish the edge to `0.0.0.0`.
+
+Docker does not make a published host port reachable when its target container
+is attached only to an `internal: true` network. The Funnel edge therefore also
+joins a project-private, non-internal `loopback` bridge, solely to make its
+`127.0.0.1:18080` binding work. It is the edge's default gateway and defaults
+any accidental port mapping to loopback; Relay remains off that bridge and has
+no host port. The bridge creates no internet listener; the Compose port binding
+is the enforced host boundary.
+
+Before enabling it, confirm that the Tailscale node has MagicDNS/HTTPS and a
+narrow Funnel policy grant (preferably on a dedicated Relay node or tag), and
+that the selected public port is currently free. Copy
+`relay.funnel.env.example` to the same protected `relay.env` location used by
+the backup jobs, set reviewed image digests and durable paths, then use the
+separate Funnel unit:
+
+```sh
+sudo install --mode 0644 /opt/fns-relay/systemd/fns-relay-funnel.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fns-relay-funnel.service
+```
+
+The unit starts `compose.funnel.yaml` and then runs `bin/funnel.sh start`.
+That command uses a persistent Tailscale `--bg` configuration, TLS-terminated
+TCP, and PROXY protocol v2. `bin/funnel.sh verify` records the local boundary
+and `tailscale funnel status --json` under the evidence directory. It does not
+prove public DNS or a working backend from an independent network; perform an
+external anonymous-read smoke as well. Stop this endpoint with
+`bin/funnel.sh stop`; do not use `tailscale funnel reset`, which can remove
+unrelated Funnel configuration on the host.
+
+Do not run `fns-relay.service` (the direct TLS profile) and
+`fns-relay-funnel.service` against the same data paths. The Funnel profile
+still requires application-level capability bearer authentication for
+publication: Funnel grants no FNS publication authority.
+
+### Deliberately limited non-root home beta
+
+If a trusted home-server account has Docker access but cannot install a root
+systemd unit, `home-funnel-beta-bootstrap.sh` initializes only a user-owned
+runtime tree and builds a reviewed image. It generates two local Relay secrets
+only when neither exists, makes them unreadable to the host user after setup,
+and uses narrowly mounted Docker helpers to assign the service UID/GID. Set
+`FNS_RELAY_HOME_BETA_ROOT` plus all durable paths below that root and explicitly
+acknowledge the beta class:
+
+```sh
+export FNS_RELAY_HOME_BETA_CONFIRM=I_UNDERSTAND_HOME_FUNNEL_BETA_IS_NOT_SLO_COMPLIANT
+bash /path/to/fns-v0/ops/host-relay/bin/home-funnel-beta-bootstrap.sh
+docker compose --project-name fns-relay-funnel --env-file /path/to/relay.env \
+  --file /path/to/fns-v0/ops/host-relay/compose.funnel.yaml up --detach
+bash /path/to/fns-v0/ops/host-relay/bin/funnel.sh start
+```
+
+This path is suitable only for the public-beta endpoint. It is **not** allowed
+to claim the stated RPO/RTO until root-managed archive timers, an independent
+encrypted off-provider destination, restore drills, and alert delivery have
+been configured and evidenced. Docker access itself is host-root-equivalent;
+do not grant it to an untrusted account.
+
+`target-host-funnel-smoke.sh` is the Linux/amd64 disposable test for this
+profile. It validates the loopback-only port, PROXY v2 parsing, health/readiness
+hiding, capability publication, anonymous pagination, graceful restart, and a
+verified logical archive without altering Tailscale state. It complements,
+rather than replaces, `target-host-smoke.sh`'s direct-TLS fresh-restore and
+bad-permission coverage.
+
 ## Target-host smoke (explicitly non-production)
 
 Run the following only after a real reviewed Relay image/build record and edge
@@ -210,6 +299,78 @@ sudo -E bash /opt/fns-relay/bin/restore-drill.sh
 
 That path verifies the downloaded remote checksum, manifest, archive contract,
 and recovered image metadata without reading a primary-host archive directory.
+
+## Recovery host (independent new-location drill)
+
+The primary-host drill restores from a copy that the same host wrote, so it
+cannot prove recovery across a provider loss. A separate recovery host in an
+independent failure domain runs the same `restore-drill.sh` against the
+off-provider remote plus a five-minute anonymous public read probe
+(`probe-public.sh`). It has no production Relay data paths, capability DB, or
+secrets — only a recovery-scoped, read-only `rclone` credential for the same
+encrypted remote, an alert receiver, and append-only local evidence.
+
+Copy `recovery.env.example` to `/etc/fns-relay/recovery.env` on the recovery
+host, replace every example value, and protect it as root-owned. The alert
+webhook URL (and optional bearer token) live in separate root-only files named
+in `recovery.env`, never in the environment file itself. Provision a
+recovery-scoped `rclone` `crypt` config with a read-only credential for the
+primary host's encrypted remote.
+
+```sh
+sudo install --directory --mode 0750 /etc/fns-relay /opt/fns-relay
+sudo install --mode 0640 --owner root --group root recovery.env.example /etc/fns-relay/recovery.env
+sudo install --directory --mode 0700 /etc/fns-relay/off-provider /etc/fns-relay/alerts
+set -a
+. /etc/fns-relay/recovery.env
+set +a
+sudo -E bash /opt/fns-relay/bin/initialize-recovery-host.sh
+```
+
+`initialize-recovery-host.sh` creates only the evidence and drill-root
+directories with root-only ownership and modes; it never generates or copies
+secret material. Install the recovery units and timers from `systemd/` after
+adapting their absolute paths to the recovery-host layout:
+
+```sh
+sudo install --mode 0644 /opt/fns-relay/systemd/fns-relay-recovery-restore-drill.service \
+  /opt/fns-relay/systemd/fns-relay-recovery-restore-drill.timer \
+  /opt/fns-relay/systemd/fns-relay-recovery-public-probe.service \
+  /opt/fns-relay/systemd/fns-relay-recovery-public-probe.timer \
+  /opt/fns-relay/systemd/fns-relay-alert@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fns-relay-recovery-restore-drill.timer \
+  fns-relay-recovery-public-probe.timer
+```
+
+- `fns-relay-recovery-restore-drill.timer` runs weekly (Sun 04:30, with up to
+  30 min jitter). It selects the latest off-provider receipt (or an
+  explicitly named archive), downloads and verifies checksum/manifest/archive
+  digest, rebuilds a temporary Relay image from the manifest's immutable
+  source offer and pinned Node digest, restores into fresh drill directories
+  with new non-production secrets, starts an isolated loopback Relay, verifies
+  readiness and an anonymous object read, and records elapsed-time evidence.
+  It fails the four-hour RTO target if it cannot finish in time.
+- `fns-relay-recovery-public-probe.timer` runs every five minutes from boot.
+  It independently fetches the public `/.well-known/fns-source` offer and one
+  operator-selected anonymous object read, so transport-level reachability is
+  observed from outside the primary failure domain rather than from the Relay
+  host itself.
+- Both recovery units, like every one-shot job, are wired
+  `OnFailure=fns-relay-alert@%n.service`, which emits a credential-free failure
+  event to the recovery host's alert receiver and writes an `alert-*.json`
+  evidence record. `fns-relay-alert@.service` reads either `relay.env` or
+  `recovery.env`, so the same template unit serves both hosts.
+
+The primary-host `check-slos.sh` enforces the SLO against the primary host's
+own evidence (archive age ≤ 1 h, off-provider receipt ≤ 24 h, weekly restore
+drill success, container health + `/readyz`). The recovery host does not feed
+that checker — it has its own evidence directory and its own `OnFailure`
+alerting. The two are complementary, not cross-referenced by one job: the
+primary drill proves restore from a copy the same host wrote, and the
+recovery-host drill + public probe prove the same boundary from an independent
+failure domain. Do not run the primary-host and recovery-host timers on the
+same machine — independence is the property being evidenced.
 
 ## What is still platform-owned
 

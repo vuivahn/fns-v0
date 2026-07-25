@@ -41,11 +41,23 @@ require_root() {
 }
 
 require_safe_absolute_path() {
-  local name value
+  local name value remainder component
   for name in "$@"; do
     require_var "$name"
     value="${!name}"
     [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ && "$value" != "/" ]] || fail "${name} must be a simple absolute path"
+    # Reject parent-directory (..) components so a typo like
+    # /srv/fns-relay/../../var/log is not silently accepted.
+    remainder="${value#/}"
+    while [[ -n "$remainder" ]]; do
+      component="${remainder%%/*}"
+      [[ "$component" != ".." ]] || fail "${name} must not contain a parent-directory (..) segment"
+      if [[ "$remainder" == */* ]]; then
+        remainder="${remainder#*/}"
+      else
+        break
+      fi
+    done
   done
 }
 
@@ -83,6 +95,11 @@ require_runtime_configuration() {
     FNS_RELAY_VERIFIED_ARCHIVE_DIR \
     FNS_RELAY_EVIDENCE_DIR \
     FNS_RELAY_DRILL_ROOT
+}
+
+require_recovery_configuration() {
+  require_var FNS_RELAY_EVIDENCE_DIR FNS_RELAY_DRILL_ROOT
+  require_safe_absolute_path FNS_RELAY_EVIDENCE_DIR FNS_RELAY_DRILL_ROOT
 }
 
 utc_compact() {

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=FNS Relay independent public source/read probe
+Wants=network-online.target
+After=network-online.target
+OnFailure=fns-relay-alert@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fns-relay/recovery.env
+ExecStart=/usr/bin/env bash /opt/fns-relay/bin/probe-public.sh
+TimeoutStartSec=1min

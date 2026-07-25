@@ -159,6 +159,11 @@ function createPublicRelayServer({
     normalizedSourceOfferUrl === null ? {} : { link: `<${normalizedSourceOfferUrl}>; rel="source"` };
 
   return http.createServer(async (request, response) => {
+    // A client that aborts mid-write emits an "error" event on the request or
+    // response. With no listener Node treats it as an uncaught exception and
+    // exits the process, so a single flaky peer can take the Relay down.
+    request.on("error", () => {});
+    response.on("error", () => {});
     try {
       if (typeof request.url !== "string" || Buffer.byteLength(request.url, "utf8") > maximumUrlBytes)
         throw new RelayLimitError("request URL exceeds the configured limit", { maximumUrlBytes });
@@ -258,6 +263,12 @@ function createPublicRelayServer({
       }
       send(404, { error: { code: "E_RELAY_NOT_FOUND", message: "route was not found" } });
     } catch (error) {
+      if (response.headersSent) {
+        // Headers (and possibly part of the body) already went out before the
+        // failure; the response cannot be replaced, so just end the socket.
+        if (!response.writableEnded) response.end();
+        return;
+      }
       const publicResult = publicError(error);
       // A limit response must still be deliverable even when the configured
       // representation budget is smaller than the structured error itself.
