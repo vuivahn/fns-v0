@@ -125,6 +125,7 @@ for (const expected of [
   "compose.funnel.yaml",
   "funnel-proxy-client.js",
   "--network host",
+  "HostConfig.PortBindings",
   "proxyProtocol",
   "relay:publication:create",
   "nextCursor",

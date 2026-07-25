@@ -250,7 +250,8 @@ edge_networks="$(docker inspect "$edge_container" --format '{{json .NetworkSetti
 [[ "$edge_networks" == *"\"${private_network}\":"* ]] || fail "Funnel smoke edge must use the private network"
 [[ -z "$(docker port "$relay_container" 8080/tcp 2>/dev/null || true)" ]] \
   || fail "Funnel smoke Relay must not publish port 8080 to the host"
-[[ "$(docker port "$edge_container" 8080/tcp)" == "127.0.0.1:${edge_port}" ]] \
+edge_port_bindings="$(docker inspect "$edge_container" --format '{{json .HostConfig.PortBindings}}')"
+[[ "$edge_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${edge_port}\"}"* ]] \
   || fail "Funnel smoke edge must publish only its loopback port"
 wait_for_relay_ready
 relay_internal_status /healthz

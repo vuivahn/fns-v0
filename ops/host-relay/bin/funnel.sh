@@ -63,14 +63,17 @@ edge_status() {
 }
 
 verify_local_boundary() {
-  local relay_ports edge_ports
+  local relay_ports edge_port_bindings
   relay_ready
   [[ "$(docker inspect --format '{{.State.Running}}' "$edge_container" 2>/dev/null)" == true ]] \
     || fail "Funnel edge is not running: ${edge_container}"
   relay_ports="$(docker port "$relay_container" 8080/tcp 2>/dev/null || true)"
   [[ -z "$relay_ports" ]] || fail "Relay must not publish port 8080 to the host"
-  edge_ports="$(docker port "$edge_container" 8080/tcp 2>/dev/null || true)"
-  [[ "$edge_ports" == "127.0.0.1:${FNS_RELAY_FUNNEL_EDGE_PORT}" ]] \
+  # nginx's stock image exposes 80/443, not this profile's unprivileged 8080.
+  # Inspect the configured Docker binding directly; the following PROXY-v2
+  # requests prove the binding is live rather than relying on EXPOSE metadata.
+  edge_port_bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$edge_container")"
+  [[ "$edge_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${FNS_RELAY_FUNNEL_EDGE_PORT}\"}"* ]] \
     || fail "Funnel edge must publish only 127.0.0.1:${FNS_RELAY_FUNNEL_EDGE_PORT}"
   [[ "$(edge_status /healthz)" == 404 ]] || fail "Funnel edge must hide /healthz"
   [[ "$(edge_status /readyz)" == 404 ]] || fail "Funnel edge must hide /readyz"
