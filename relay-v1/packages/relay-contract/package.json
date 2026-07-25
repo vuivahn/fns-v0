@@ -1,0 +1,12 @@
+{
+  "name": "@fns-v0/relay-contract-v1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend-neutral Relay v1 contracts and conformance helpers",
+  "type": "commonjs",
+  "license": "MPL-2.0",
+  "main": "./src/index.js",
+  "engines": {
+    "node": ">=20"
+  }
+}

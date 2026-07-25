@@ -1,61 +1,111 @@
 # FNS Store Interface v0
 
-FNS Core v0와 저장·전송 환경 사이의 비동기, 읽기 전용 후보 발견 경계에 대한 참조 구현입니다. Store는 검증되지 않은 JSON 후보와 관측 정보를 제공할 뿐, 객체 유효성, release 상태, capability, fork, conflict, local trust를 판단하지 않습니다.
+This repository contains the frozen asynchronous, read-only `FnsStore` v0
+contract, its memory and SQLite reference implementations, and a separate
+Relay v1 foundation. A store preserves observable raw JSON candidates; it does
+not decide FNS identity, trust, authority, ranking, validity, or a canonical
+head.
 
-현재 이 저장소는 서비스나 Relay가 아니라 `MemoryStore`와 async adapter를 제공하는 Node.js 라이브러리입니다.
+## Repository boundary
 
-## 상태와 범위
+- `src/`: MPL-2.0 Store Interface v0 and the SQLite reference backend.
+- `relay-v1/packages/`: MPL-2.0 Relay contracts, conformance helpers, and
+  local adapters.
+- `relay-v1/apps/public-relay/`: the separate AGPL-3.0-or-later HTTP
+  application.
+- `specs/` and `test-vectors/`: CC0-1.0 specifications, schemas, and vectors.
 
-- Node.js 20 이상 지원
-- `FnsStore`의 네 read API와 `MemoryStore` 참조 구현 제공
-- `discoverFromStore`와 `resolveAliasFromStore` async bridge 제공
-- canonical ObjectId, strict JSON 값, 결정적 코드포인트 정렬, defensive copy를 검증
-- write/delete/sync/subscription/transaction, relay, pagination, federation, ranking, trust policy는 v0 범위 밖
+The root npm package deliberately ships only `src/`. Relay packages are
+private workspace material for now, not part of the v0 library artifact.
 
-상세 계약은 [Store Interface v0 Plan](STORE-INTERFACE-V0-PLAN.md)과 [Store Interface v0 Freeze](STORE-INTERFACE-V0-FREEZE.md)를 참고하세요.
+## Store v0
 
-## 시작하기
+`FnsStore` exposes asynchronous `getObject`, `findAliasBindings`,
+`findAliasReleases`, and `findCommuneDocuments` reads. `MemoryStore` supports
+fixtures; `SQLiteStore` is the persistent reference backend. The public store
+surface is read-only. Import, integrity, physical backup, logical export, and
+Relay-only page reads live on `SQLiteStoreAdmin` so the frozen v0 contract does
+not grow operational methods.
+
+```js
+const { SQLiteStore, SQLiteStoreAdmin, discoverFromStore } = require("fns-store-interface-v0");
+
+const store = new SQLiteStore({ filename: "./data/fns.sqlite", source: "sqlite:local" });
+const admin = new SQLiteStoreAdmin(store);
+
+admin.importSnapshot({ entries: [], coverage: [] });
+const discovery = await discoverFromStore({ context, alias }, store);
+const portableSnapshot = admin.exportSnapshot();
+store.close();
+```
+
+See [SQLite Store Guide](SQLITE-STORE.md) for coverage, migration, backup, and
+restore details. `complete` in a discovery envelope means the backend's
+observation of that scope is complete; an empty result is not automatically a
+complete result.
+
+## Relay v1 local reference
+
+Relay is separate from the v0 package and is never canonical, default, or
+trusted. Anonymous reads are available through the public HTTP application;
+publication requires a scoped, expiring, Relay-local opaque bearer capability.
+The capability implementation is deliberately independent of FNS identity,
+trust, authority, signatures, and ranking.
+
+```text
+Relay contract (MPL-2.0)
+├─ Local reference: SQLiteCandidateStore + FileSystemBlobStore
+├─ Optional serverless profile: D1CandidateStore + R2ContentBlobStore (planned)
+└─ Alternative scale profile: PostgreSQL + S3-compatible storage (planned)
+
+Public Relay application (AGPL-3.0-or-later)
+└─ anonymous GET reads, capability-gated POST publication
+```
+
+The implemented local profile has immutable/idempotent candidate publication,
+conflict detection, durable filesystem blob staging, bounded SQL page reads,
+HMAC-protected expiring cursors, health/readiness endpoints, logical archive
+export/restore, and reusable storage conformance tests. The wire surface is
+documented in [Relay v1 specification](specs/relay-v1/README.md).
+
+To run the local app or create/validate/restore an archive, follow
+[the public Relay application guide](relay-v1/apps/public-relay/README.md).
+The repository now includes a provider-neutral Linux host profile for the
+SQLite/filesystem reference Relay: Docker Compose, an Nginx TLS/rate-limit
+edge, verified archives, encrypted off-provider copy hooks, and isolated
+restore-drill automation. No cloud account, DNS zone, TLS certificate,
+off-provider destination, or live public deployment is claimed or configured
+here yet.
+
+## Verification
 
 ```text
 npm ci
-npm test
-```
-
-PowerShell 실행 정책으로 `npm` shim이 막힌 환경에서는 다음 명령을 사용합니다.
-
-```text
-npm.cmd test
-```
-
-## API
-
-```js
-const {
-  FnsStore,
-  MemoryStore,
-  discoverFromStore,
-  resolveAliasFromStore
-} = require("fns-store-interface-v0");
-
-const store = new MemoryStore({ source: "memory:example" });
-// store.put(...) is fixture/reference-store setup only.
-
-const discovery = await discoverFromStore({ context, alias }, store);
-const result = await resolveAliasFromStore({ context, alias }, store);
-```
-
-`FnsStore` 구현은 `getObject`, `findAliasBindings`, `findAliasReleases`, `findCommuneDocuments`를 비동기로 제공해야 합니다. 발견 결과는 `complete`, `provenance`, `warnings`를 메서드별로 보존합니다.
-
-## 개발 및 검증
-
-```text
 npm run check
-npm test
 npm run test:strict
+npm run coverage
+npm run audit:prod
+npm run package:check
 ```
 
-GitHub Actions는 Node.js 20, 22, 24에서 위 검증과 package dry-run을 실행합니다.
+In PowerShell, use `npm.cmd` if the `npm` shim has an execution-policy issue.
+CI runs the quality gate on Node.js 20, 22, and 24.
 
-## 라이선스
+## Operations and next work
 
-이 저장소의 라이선스는 아직 선택되지 않았습니다. 공개 재배포 또는 npm 배포 전에 저장소 소유자가 명시적인 라이선스를 추가해야 합니다.
+The operating profile records a primary failure-domain RPO of one hour, a
+provider-loss RPO of up to 24 hours while off-provider copies remain daily, and
+an RTO of four hours. It includes hourly backup, daily independent copy, and
+regular isolated restore verification. A Relay outage is not an FNS-wide
+outage.
+
+Read [Infrastructure Roadmap](INFRASTRUCTURE-ROADMAP.md) for current status,
+[Relay v1 RFC](RELAY-V1-RFC.md) for the protocol boundary, and
+[operations guidance](ops/README.md) for recovery, SLO, and adapter-transition
+criteria.
+
+## License
+
+The per-scope license map is in [LICENSES.md](LICENSES.md): MPL-2.0 for Core
+and reusable Relay code, AGPL-3.0-or-later for the public Relay application,
+and CC0-1.0 for specifications, schemas, and vectors.

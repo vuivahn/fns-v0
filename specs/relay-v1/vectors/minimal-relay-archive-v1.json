@@ -1,0 +1,40 @@
+{
+  "version": "fns.relay-archive.v1",
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "candidateSnapshot": {
+    "version": "fns.store-export.v1",
+    "source": "sqlite:reference-vector",
+    "snapshot": "v1",
+    "dataRevision": 0,
+    "entries": [
+      {
+        "objectId": "fns:obj:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "object": {
+          "payload": {
+            "type": "fns.commune.genesis"
+          }
+        }
+      }
+    ],
+    "coverage": [
+      {
+        "method": "communeDocuments",
+        "scope": {
+          "context": "fns:obj:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "complete": true
+      }
+    ]
+  },
+  "blobs": [
+    {
+      "objectId": "fns:obj:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "object": {
+        "payload": {
+          "type": "fns.commune.genesis"
+        }
+      }
+    }
+  ],
+  "digest": "UpihGq3_Sg4H8IJKlKcWdZrBZnQ7AFfCKU6XE1hs8z4"
+}

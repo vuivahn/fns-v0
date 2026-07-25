@@ -1,0 +1,49 @@
+# Source-control and local-agent state
+.git
+.github
+.agents
+.codex
+
+# Dependencies and generated artifacts
+node_modules
+coverage
+.nyc_output
+*.tgz
+npm-debug.log*
+dist
+build
+test
+test/
+test-vectors
+test-vectors/
+specs
+specs/
+
+# Runtime state and backup material must never become build context. The
+# production Dockerfile also uses an explicit COPY whitelist, so this is a
+# defensive boundary rather than the sole protection.
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+relay-data
+relay-data/
+relay-backups
+relay-backups/
+backups
+backups/
+*.archive.json
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.npmrc
+*.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+*.token
+secrets
+secrets/

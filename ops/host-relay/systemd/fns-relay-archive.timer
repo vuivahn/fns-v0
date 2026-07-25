@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=Run FNS Relay archive after each completed archive job
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+Unit=fns-relay-archive.service
+
+[Install]
+WantedBy=timers.target

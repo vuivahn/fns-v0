@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Relay container
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: relay-container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: linux/amd64 deployment smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use a real public commit, not GitHub's synthetic pull-request merge
+          # commit, because the source-offer smoke resolves its immutable archive.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: npm run test:container
+      - run: npm run check:host-relay
+      - run: bash -n ops/host-relay/bin/*.sh
+      - run: docker compose --env-file ops/host-relay/relay.env.example --file ops/host-relay/compose.yaml config >/dev/null
+      - run: |
+          systemd-analyze timespan '2min'
+          systemd-analyze timespan '15min'
+          systemd-analyze calendar '*-*-* 00:15:00'
+          systemd-analyze calendar '*-*-* 12:15:00'
+          systemd-analyze calendar 'Sun *-*-* 03:30:00'
+
+  host-profile-smoke:
+    name: linux/amd64 host profile smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FNS_RELAY_SOURCE_DIR: ${{ github.workspace }}
+      FNS_RELAY_IMAGE: fns-public-relay:host-smoke-${{ github.sha }}
+      FNS_RELAY_DOMAIN: relay.example.com
+      FNS_RELAY_RELAY_CONTAINER_NAME: fns-relay
+      FNS_RELAY_EDGE_CONTAINER_NAME: fns-relay-edge
+      FNS_RELAY_EDGE_HTTP_BIND: 0.0.0.0
+      FNS_RELAY_EDGE_HTTP_PORT: "80"
+      FNS_RELAY_EDGE_HTTPS_BIND: 0.0.0.0
+      FNS_RELAY_EDGE_HTTPS_PORT: "443"
+      FNS_RELAY_SMOKE_CONFIRM: I_UNDERSTAND_THIS_IS_NONPRODUCTION
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Configure disposable host paths
+        run: |
+          echo "FNS_RELAY_CANDIDATE_DIR=$RUNNER_TEMP/fns-relay-production/candidates" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_BLOB_DIR=$RUNNER_TEMP/fns-relay-production/blobs" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_CAPABILITY_DIR=$RUNNER_TEMP/fns-relay-production/capabilities" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_SECRETS_DIR=$RUNNER_TEMP/fns-relay-production/secrets" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_ARCHIVE_STAGING_DIR=$RUNNER_TEMP/fns-relay-production/archive-staging" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_VERIFIED_ARCHIVE_DIR=$RUNNER_TEMP/fns-relay-production/verified-archive" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_EVIDENCE_DIR=$RUNNER_TEMP/fns-relay-production/evidence" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_DRILL_ROOT=$RUNNER_TEMP/fns-relay-production/drills" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_TLS_DIR=$RUNNER_TEMP/fns-relay-production/tls" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_ACME_WEBROOT=$RUNNER_TEMP/fns-relay-production/acme" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_SMOKE_ROOT=$RUNNER_TEMP/fns-relay-host-smoke" >> "$GITHUB_ENV"
+      - name: Resolve reviewed test image digests
+        run: |
+          docker pull node:22-bookworm-slim
+          docker pull nginx:1.27-alpine
+          echo "FNS_RELAY_NODE_IMAGE=$(docker image inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}')" >> "$GITHUB_ENV"
+          echo "FNS_RELAY_EDGE_IMAGE=$(docker image inspect nginx:1.27-alpine --format '{{index .RepoDigests 0}}')" >> "$GITHUB_ENV"
+      - name: Build the immutable Relay image record
+        run: |
+          sudo git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo -E bash ops/host-relay/bin/initialize-host.sh
+          sudo -E bash ops/host-relay/bin/build-image.sh
+      - name: Exercise the disposable Linux host profile
+        run: sudo -E bash ops/host-relay/bin/target-host-smoke.sh

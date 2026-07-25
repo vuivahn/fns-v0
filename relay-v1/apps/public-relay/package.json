@@ -1,0 +1,16 @@
+{
+  "name": "@fns-v0/public-relay-v1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AGPL public HTTP Relay application for FNS Relay v1",
+  "type": "commonjs",
+  "license": "AGPL-3.0-or-later",
+  "main": "./src/server.js",
+  "scripts": {
+    "admin": "node ./bin/admin.js",
+    "start": "node ./bin/start.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

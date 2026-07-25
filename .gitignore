@@ -11,5 +11,8 @@ pnpm-debug.log*
 dist/
 build/
 *.tgz
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 .DS_Store
 Thumbs.db

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=FNS Relay recovery-objective and readiness check
+After=fns-relay.service
+Requires=fns-relay.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fns-relay/relay.env
+ExecStart=/usr/bin/env bash /opt/fns-relay/bin/check-slos.sh
+TimeoutStartSec=1min

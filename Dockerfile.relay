@@ -1,0 +1,96 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Build with the repository root as context:
+# docker build --file Dockerfile.relay --build-arg FNS_RELAY_SOURCE_OFFER_URL=... .
+#
+# This is intentionally separate from Dockerfile.ci. The CI image copies the
+# test suite and development dependencies; this image copies only the runtime
+# application, reusable Relay code, and license/source-offer material.
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+FROM ${NODE_IMAGE} AS dependencies
+
+WORKDIR /opt/fns-relay
+
+# better-sqlite3 normally uses a matching prebuild. Keep a native build fallback
+# available for a supported target architecture without carrying toolchains into
+# the runtime image.
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM ${NODE_IMAGE} AS runtime
+
+ARG FNS_RELAY_SOURCE_OFFER_URL
+
+# A public image must identify one immutable public source revision. Restrict
+# the offer to this repository's immutable source archive rather than a moving
+# branch or tag. The running application exposes this value at
+# /.well-known/fns-source.
+RUN printf '%s\n' "${FNS_RELAY_SOURCE_OFFER_URL}" \
+  | grep --extended-regexp --quiet '^https://github\.com/vuivahn/fns-v0/archive/[0-9a-f]{40}\.tar\.gz$' \
+  || (echo >&2 'FNS_RELAY_SOURCE_OFFER_URL must be an immutable full GitHub source archive URL'; exit 1)
+
+RUN groupadd --gid 10001 fnsrelay \
+  && useradd --uid 10001 --gid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin fnsrelay \
+  && install --directory --owner 10001 --group 10001 --mode 0750 \
+    /var/lib/fns-relay/candidates \
+    /var/lib/fns-relay/capabilities \
+    /var/lib/fns-relay/blobs \
+    /var/backups/fns-relay/archive \
+  && install --directory --owner root --group root --mode 0755 \
+    /usr/share/licenses/fns-relay \
+    /usr/share/doc/fns-relay \
+    /run/secrets
+
+WORKDIR /opt/fns-relay
+
+# Whitelist production inputs. In particular, no test fixtures, Git metadata,
+# local database, archive, environment file, or developer credential is copied
+# into the public image.
+COPY --from=dependencies /opt/fns-relay/node_modules ./node_modules
+COPY package.json package-lock.json LICENSE LICENSES.md ./
+COPY src ./src
+COPY relay-v1/LICENSES.md ./relay-v1/LICENSES.md
+COPY relay-v1/packages/relay-contract ./relay-v1/packages/relay-contract
+COPY relay-v1/packages/relay-local ./relay-v1/packages/relay-local
+COPY relay-v1/apps/public-relay ./relay-v1/apps/public-relay
+
+# Preserve the license texts and deployment/source-offer record in predictable
+# paths even when an operator only has the image filesystem available.
+COPY LICENSE /usr/share/licenses/fns-relay/MPL-2.0.txt
+COPY relay-v1/apps/public-relay/LICENSE /usr/share/licenses/fns-relay/AGPL-3.0-or-later.txt
+COPY relay-v1/apps/public-relay/SOURCE-OFFER.md /usr/share/doc/fns-relay/SOURCE-OFFER.md
+COPY Dockerfile.relay /usr/share/doc/fns-relay/Dockerfile.relay
+RUN printf '%s\n' "${FNS_RELAY_SOURCE_OFFER_URL}" > /usr/share/doc/fns-relay/SOURCE-OFFER-URL \
+  && chmod 0444 /usr/share/doc/fns-relay/SOURCE-OFFER-URL
+
+RUN chmod --recursive a-w /opt/fns-relay
+
+ENV HOME=/nonexistent \
+    NODE_ENV=production \
+    FNS_RELAY_LISTEN_HOST=0.0.0.0 \
+    FNS_RELAY_PORT=8080 \
+    FNS_RELAY_CANDIDATES_DB=/var/lib/fns-relay/candidates/candidates.sqlite \
+    FNS_RELAY_CAPABILITY_DB=/var/lib/fns-relay/capabilities/capabilities.sqlite \
+    FNS_RELAY_BLOB_DIR=/var/lib/fns-relay/blobs
+
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later AND MPL-2.0" \
+  org.opencontainers.image.source="${FNS_RELAY_SOURCE_OFFER_URL}"
+
+USER 10001:10001
+
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+
+# Liveness deliberately checks only /healthz. Platforms should use /readyz as
+# their readiness probe because it verifies the mounted Relay storage.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["node", "-e", "const http=require('http');const port=process.env.FNS_RELAY_PORT||'8080';const request=http.get('http://127.0.0.1:'+port+'/healthz',(response)=>{response.resume();process.exit(response.statusCode===200?0:1)});request.on('error',()=>process.exit(1));request.setTimeout(2000,()=>{request.destroy();process.exit(1)})"]
+
+# Keep Node as PID 1 so the application's SIGTERM handler controls graceful
+# shutdown. No ENTRYPOINT is used: one-shot admin commands can override CMD.
+CMD ["node", "relay-v1/apps/public-relay/bin/start.js"]

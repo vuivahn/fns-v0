@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Unit]
+Description=Check FNS Relay readiness and backup ages every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=fns-relay-slo-check.service
+
+[Install]
+WantedBy=timers.target
