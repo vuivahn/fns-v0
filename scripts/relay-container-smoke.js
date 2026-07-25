@@ -179,6 +179,21 @@ async function waitForRelayReadiness(baseUrl, container, pathname = "/readyz") {
   }
 }
 
+async function waitForContainerExit(container, timeoutMilliseconds = 10000) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  let state = null;
+  while (Date.now() < deadline) {
+    state = JSON.parse(docker(["inspect", container, "--format", "{{json .State}}"]).stdout);
+    if (!state.Running) return state;
+    await wait(100);
+  }
+  const logResult = docker(["logs", "--tail", "100", container]);
+  const logs = [logResult.stdout, logResult.stderr].filter(Boolean).join("\n").trim();
+  throw new Error(
+    `${container} did not exit within ${timeoutMilliseconds}ms; state: ${JSON.stringify(state)}\n${container} logs:\n${logs}`
+  );
+}
+
 function publishedPort(container) {
   const output = docker(["port", container, "8080/tcp"]).stdout.trim();
   const match = /:(\d+)\s*$/.exec(output);
@@ -206,7 +221,8 @@ function serviceArguments({
   blobVolume,
   capabilityVolume,
   secretVolume,
-  detached = true
+  detached = true,
+  dataReadonly = false
 }) {
   const args = [
     "run",
@@ -223,7 +239,7 @@ function serviceArguments({
     "128",
     "--publish",
     "127.0.0.1::8080",
-    ...dataMountArguments({ candidateVolume, blobVolume, capabilityVolume }),
+    ...dataMountArguments({ candidateVolume, blobVolume, capabilityVolume, readonly: dataReadonly }),
     "--mount",
     `type=volume,source=${secretVolume},target=/run/secrets,readonly`,
     "--env",
@@ -375,23 +391,6 @@ function initializeSecretVolume(image, volume, pepper, cursorSecret) {
   );
 }
 
-function makeBadOwnershipVolume(image, volume) {
-  const script = ["const fs=require('fs');", "fs.chownSync('/volume',0,0);", "fs.chmodSync('/volume',0o555);"].join("");
-  docker([
-    "run",
-    "--rm",
-    "--user",
-    "0:0",
-    "--mount",
-    `type=volume,source=${volume},target=/volume`,
-    "--entrypoint",
-    "node",
-    image,
-    "-e",
-    script
-  ]);
-}
-
 async function main() {
   docker(["version", "--format", "{{.Server.Version}}"]);
   const revision = requireCleanSourceRevision();
@@ -456,6 +455,7 @@ async function main() {
       targetCandidateVolume,
       targetBlobVolume,
       targetCapabilityVolume,
+      badCandidateVolume,
       badBlobVolume,
       badCapabilityVolume
     ])
@@ -463,8 +463,6 @@ async function main() {
     initializeArchiveVolume(image, archiveVolume);
     initializeSecretVolume(image, sourceSecretVolume, pepper, cursorSecret);
     initializeSecretVolume(image, targetSecretVolume, targetPepper, targetCursorSecret);
-    makeBadOwnershipVolume(image, badCandidateVolume);
-
     process.stdout.write("Starting fresh Relay volume and checking migration/readiness...\n");
     docker(
       serviceArguments({
@@ -706,8 +704,8 @@ async function main() {
     assert.strictEqual(restored.status, 200);
     assert.strictEqual(relayAdmin(targetContainer, ["verify"]).report.blobs.blobs, 2);
 
-    process.stdout.write("Checking a bad data-volume ownership fails safely...\n");
-    const badResult = docker(
+    process.stdout.write("Checking a read-only data mount fails safely...\n");
+    docker(
       serviceArguments({
         container: badContainer,
         image,
@@ -715,10 +713,12 @@ async function main() {
         blobVolume: badBlobVolume,
         capabilityVolume: badCapabilityVolume,
         secretVolume: sourceSecretVolume,
-        detached: false
-      }),
-      { expectedStatus: 1, timeout: 10000 }
+        dataReadonly: true
+      })
     );
+    const badState = await waitForContainerExit(badContainer);
+    assert.strictEqual(badState.ExitCode, 1, "a Relay with a read-only data mount must fail startup");
+    const badResult = docker(["logs", badContainer]);
     assert.match(
       `${badResult.stdout}\n${badResult.stderr}`,
       /FNS_RELAY_(CANDIDATES_DB|CAPABILITY_DB|BLOB_DIR).*writable/i
