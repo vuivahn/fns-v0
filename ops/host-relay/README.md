@@ -16,9 +16,9 @@ Internet
   │ TLS + rate limits
   ▼
 Nginx edge :80/:443
-  │ private Compose network
+  │ public + private Compose networks
   ▼
-Relay :8080 (also host loopback :18080 for probes)
+Relay :8080 (private network only)
   ├─ candidates/    bind mount, read/write, UID/GID 10001
   ├─ blobs/         bind mount, read/write, UID/GID 10001
   ├─ capabilities/  bind mount, read/write, UID/GID 10001
@@ -96,8 +96,11 @@ sudo docker compose --env-file /etc/fns-relay/relay.env -f /opt/fns-relay/compos
 ```
 
 The Compose file uses long bind syntax with `create_host_path: false` so Docker
-cannot silently create a root-owned empty data directory. It keeps Relay on
-`127.0.0.1:${FNS_RELAY_PROBE_PORT}` and only the edge publishes ports `80/443`.
+cannot silently create a root-owned empty data directory. It keeps Relay on an
+internal-only network; only the edge joins both the public and Relay networks
+and publishes ports `80/443`. The SLO check uses the container healthcheck and
+an in-container `/readyz` request, so it does not create a bypass around the
+public edge.
 Do not use `docker compose down -v`, volume prune, or overlapping old/new
 writers during an update. The default container names and edge binds are
 parameterized only so `target-host-smoke.sh` can use isolated names and
@@ -123,7 +126,7 @@ sudo -E bash /opt/fns-relay/bin/target-host-smoke.sh
 The smoke uses fresh capability and cursor secrets, a self-signed `.invalid`
 certificate, unique Compose/container names, and loopback high ports. It does
 not mount production paths or pass a token on a command line. It checks
-non-root/read-only Relay configuration, direct health/readiness, edge-blocked
+non-root/read-only Relay configuration, internal health/readiness, edge-blocked
 health/readiness, capability publication, anonymous cursor pagination,
 SIGTERM/restart persistence, live verified archive, fresh restore/read, and a
 clear failure for a root-owned non-writable candidate mount. It preserves a

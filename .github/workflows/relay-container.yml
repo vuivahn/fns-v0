@@ -45,7 +45,6 @@ jobs:
     env:
       FNS_RELAY_SOURCE_DIR: ${{ github.workspace }}
       FNS_RELAY_IMAGE: fns-public-relay:host-smoke-${{ github.sha }}
-      FNS_RELAY_PROBE_PORT: "18080"
       FNS_RELAY_DOMAIN: relay.example.com
       FNS_RELAY_RELAY_CONTAINER_NAME: fns-relay
       FNS_RELAY_EDGE_CONTAINER_NAME: fns-relay-edge

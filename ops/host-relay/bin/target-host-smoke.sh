@@ -61,14 +61,11 @@ require_port() {
     || fail "${name} must be an unprivileged TCP port"
 }
 
-probe_port="${FNS_RELAY_SMOKE_PROBE_PORT:-$(random_port)}"
 http_port="${FNS_RELAY_SMOKE_HTTP_PORT:-$(random_port)}"
 https_port="${FNS_RELAY_SMOKE_HTTPS_PORT:-$(random_port)}"
-require_port FNS_RELAY_SMOKE_PROBE_PORT "$probe_port"
 require_port FNS_RELAY_SMOKE_HTTP_PORT "$http_port"
 require_port FNS_RELAY_SMOKE_HTTPS_PORT "$https_port"
-[[ "$probe_port" != "$http_port" && "$probe_port" != "$https_port" && "$http_port" != "$https_port" ]] \
-  || fail "smoke probe, HTTP, and HTTPS ports must be distinct"
+[[ "$http_port" != "$https_port" ]] || fail "smoke HTTP and HTTPS ports must be distinct"
 
 smoke_domain="${FNS_RELAY_SMOKE_DOMAIN:-relay-host-smoke.invalid}"
 [[ "$smoke_domain" =~ ^[A-Za-z0-9.-]+\.invalid$ ]] || fail "FNS_RELAY_SMOKE_DOMAIN must end in .invalid"
@@ -216,7 +213,6 @@ install --mode 0600 "${FNS_RELAY_EVIDENCE_DIR}/current-image-build.json" "${smok
 {
   printf '%s\n' "FNS_RELAY_IMAGE=${FNS_RELAY_IMAGE}"
   printf '%s\n' "FNS_RELAY_EDGE_IMAGE=${FNS_RELAY_EDGE_IMAGE}"
-  printf '%s\n' "FNS_RELAY_PROBE_PORT=${probe_port}"
   printf '%s\n' "FNS_RELAY_DOMAIN=${smoke_domain}"
   printf '%s\n' "FNS_RELAY_RELAY_CONTAINER_NAME=${relay_container}"
   printf '%s\n' "FNS_RELAY_EDGE_CONTAINER_NAME=${edge_container}"
@@ -246,8 +242,16 @@ compose_started=true
   || fail "smoke Relay is not configured to run as UID/GID 10001"
 [[ "$(docker inspect "$relay_container" --format '{{.HostConfig.ReadonlyRootfs}}')" == "true" ]] \
   || fail "smoke Relay root filesystem is not read-only"
-[[ "$(docker port "$relay_container" 8080/tcp)" == "127.0.0.1:${probe_port}" ]] \
-  || fail "smoke Relay probe port is not bound privately to 127.0.0.1:${probe_port}"
+private_network="${compose_project}_relay"
+public_network="${compose_project}_public"
+relay_networks="$(docker inspect "$relay_container" --format '{{json .NetworkSettings.Networks}}')"
+edge_networks="$(docker inspect "$edge_container" --format '{{json .NetworkSettings.Networks}}')"
+[[ "$relay_networks" == *"\"${private_network}\":"* && "$relay_networks" != *"\"${public_network}\":"* ]] \
+  || fail "smoke Relay must be attached only to the private network"
+[[ "$edge_networks" == *"\"${private_network}\":"* && "$edge_networks" == *"\"${public_network}\":"* ]] \
+  || fail "smoke edge must bridge the public and private networks"
+relay_published_ports="$(docker port "$relay_container" 8080/tcp 2>/dev/null || true)"
+[[ -z "$relay_published_ports" ]] || fail "smoke Relay must not publish port 8080 to the host"
 wait_for_relay_ready
 relay_internal_status /healthz
 [[ "$(edge_status /healthz "${responses_directory}/edge-health.json")" == "404" ]] || fail "edge must not expose /healthz"

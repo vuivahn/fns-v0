@@ -16,8 +16,6 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=16m
-    ports:
-      - "127.0.0.1:${FNS_RELAY_PROBE_PORT:-18080}:8080"
     environment:
       FNS_RELAY_CAPABILITY_PEPPER_FILE: /run/secrets/capability-pepper
       FNS_RELAY_CURSOR_SECRET_FILE: /run/secrets/cursor-secret
@@ -93,8 +91,10 @@ services:
         bind:
           create_host_path: false
     networks:
+      - public
       - relay
 
 networks:
   relay:
     internal: true
+  public: {}

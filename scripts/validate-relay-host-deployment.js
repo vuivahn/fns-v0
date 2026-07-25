@@ -22,11 +22,13 @@ function requireText(relativePath, text, expected) {
 }
 
 const compose = read("ops/host-relay/compose.yaml");
+const relayService = compose.match(/^ {2}relay:\n([\s\S]*?)^\n {2}edge:/m)?.[1] ?? "";
+const edgeService = compose.match(/^ {2}edge:\n([\s\S]*?)^\nnetworks:/m)?.[1] ?? "";
+const composeNetworks = compose.match(/^networks:\n([\s\S]*)$/m)?.[1] ?? "";
 for (const expected of [
   'user: "10001:10001"',
   'user: "101:101"',
   "read_only: true",
-  "127.0.0.1:${FNS_RELAY_PROBE_PORT:-18080}:8080",
   "FNS_RELAY_RELAY_CONTAINER_NAME:-fns-relay",
   "FNS_RELAY_EDGE_CONTAINER_NAME:-fns-relay-edge",
   "FNS_RELAY_EDGE_HTTPS_PORT:-443",
@@ -35,6 +37,16 @@ for (const expected of [
 ])
   requireText("ops/host-relay/compose.yaml", compose, expected);
 if (compose.includes("build:")) failures.push("ops/host-relay/compose.yaml must not build a mutable runtime image");
+if (relayService === "" || edgeService === "" || composeNetworks === "")
+  failures.push("ops/host-relay/compose.yaml must define Relay, edge, and networks blocks");
+if (relayService.includes("ports:") || relayService.includes("- public"))
+  failures.push("ops/host-relay/compose.yaml must keep Relay off host ports and the public network");
+if (!edgeService.includes("- public") || !edgeService.includes("- relay"))
+  failures.push("ops/host-relay/compose.yaml must attach edge to both public and private networks");
+if (!composeNetworks.includes("relay:\n    internal: true") || !composeNetworks.includes("public: {}"))
+  failures.push("ops/host-relay/compose.yaml must define an internal Relay network and a public edge network");
+if (compose.includes("FNS_RELAY_PROBE_PORT"))
+  failures.push("ops/host-relay/compose.yaml must not configure a host Relay probe port");
 
 const edge = read("ops/host-relay/nginx/relay.conf.template");
 for (const expected of [
@@ -91,14 +103,24 @@ if (drill.includes("FNS_RELAY_CANDIDATE_DIR},target"))
   failures.push("restore drill must not mount production candidate storage");
 
 const sloCheck = read("ops/host-relay/bin/check-slos.sh");
-for (const expected of ["restore_status", "latest restore drill did not succeed"])
+for (const expected of [
+  "restore_status",
+  "latest restore drill did not succeed",
+  "docker inspect",
+  "docker exec",
+  "/readyz"
+])
   requireText("ops/host-relay/bin/check-slos.sh", sloCheck, expected);
+if (sloCheck.includes("FNS_RELAY_PROBE_PORT") || sloCheck.includes("127.0.0.1:"))
+  failures.push("ops/host-relay/bin/check-slos.sh must not bypass the edge with a host Relay probe port");
 
 const environment = read("ops/host-relay/relay.env.example");
 for (const expected of ["FNS_RELAY_NODE_IMAGE=node@sha256:", "FNS_RELAY_EDGE_IMAGE=nginx@sha256:"])
   requireText("ops/host-relay/relay.env.example", environment, expected);
 if (/^FNS_RELAY_(CAPABILITY_PEPPER|CURSOR_SECRET)=/m.test(environment))
   failures.push("relay.env.example must not contain Relay secret values");
+if (environment.includes("FNS_RELAY_PROBE_PORT"))
+  failures.push("relay.env.example must not configure a host Relay probe port");
 
 for (const relativePath of [
   "ops/host-relay/systemd/fns-relay.service",
@@ -127,7 +149,6 @@ for (const expected of [
   "smoke_compose stop",
   "relay_internal_status",
   "wait_for_relay_ready",
-  "docker port",
   "archive.sh",
   "restore-replace",
   "bad-permissions",
@@ -135,6 +156,8 @@ for (const expected of [
   'bash "${script_directory}/archive.sh"'
 ])
   requireText("ops/host-relay/bin/target-host-smoke.sh", hostSmoke, expected);
+if (hostSmoke.includes("FNS_RELAY_SMOKE_PROBE_PORT") || hostSmoke.includes("FNS_RELAY_PROBE_PORT"))
+  failures.push("target-host smoke must keep the Relay probe inside the private network");
 
 for (const [relativePath, script] of [
   ["ops/host-relay/bin/restore-drill.sh", drill],
