@@ -119,7 +119,7 @@ custom-domain VM edge as the long-term production option.
 Internet HTTPS :8443
   -> Tailscale Funnel (TLS termination, PROXY protocol v2)
   -> 127.0.0.1:18080 on the home server
-  -> Nginx Funnel edge :8080 (private Docker network)
+  -> Nginx Funnel edge :8080 (loopback bridge + private Relay network)
   -> Relay :8080 (private Docker network only)
 ```
 
@@ -129,6 +129,14 @@ Tailscale forwards the original client address in that header, allowing Nginx
 to apply its read/publication rate limits per client instead of globally. Do
 not replace `$proxy_protocol_addr` with an untrusted forwarded header and do
 not publish the edge to `0.0.0.0`.
+
+Docker does not make a published host port reachable when its target container
+is attached only to an `internal: true` network. The Funnel edge therefore also
+joins a project-private, non-internal `loopback` bridge, solely to make its
+`127.0.0.1:18080` binding work. It is the edge's default gateway and defaults
+any accidental port mapping to loopback; Relay remains off that bridge and has
+no host port. The bridge creates no internet listener; the Compose port binding
+is the enforced host boundary.
 
 Before enabling it, confirm that the Tailscale node has MagicDNS/HTTPS and a
 narrow Funnel policy grant (preferably on a dedicated Relay node or tag), and

@@ -244,15 +244,27 @@ compose_started=true
 [[ "$(docker inspect "$relay_container" --format '{{.HostConfig.ReadonlyRootfs}}')" == true ]] \
   || fail "Funnel smoke Relay root filesystem is not read-only"
 private_network="${compose_project}_relay"
+loopback_network="${compose_project}_loopback"
 relay_networks="$(docker inspect "$relay_container" --format '{{json .NetworkSettings.Networks}}')"
 edge_networks="$(docker inspect "$edge_container" --format '{{json .NetworkSettings.Networks}}')"
-[[ "$relay_networks" == *"\"${private_network}\":"* ]] || fail "Funnel smoke Relay must use the private network"
-[[ "$edge_networks" == *"\"${private_network}\":"* ]] || fail "Funnel smoke edge must use the private network"
+[[ "$relay_networks" == *"\"${private_network}\":"* && "$relay_networks" != *"\"${loopback_network}\":"* ]] \
+  || fail "Funnel smoke Relay must use only the private network"
+[[ "$edge_networks" == *"\"${private_network}\":"* && "$edge_networks" == *"\"${loopback_network}\":"* ]] \
+  || fail "Funnel smoke edge must bridge the loopback and private networks"
+[[ "$(docker network inspect "$private_network" --format '{{.Internal}}')" == true ]] \
+  || fail "Funnel smoke private Relay network must be internal"
+[[ "$(docker network inspect "$loopback_network" --format '{{.Internal}}')" == false ]] \
+  || fail "Funnel smoke edge loopback bridge must be non-internal"
 [[ -z "$(docker port "$relay_container" 8080/tcp 2>/dev/null || true)" ]] \
   || fail "Funnel smoke Relay must not publish port 8080 to the host"
 edge_port_bindings="$(docker inspect "$edge_container" --format '{{json .HostConfig.PortBindings}}')"
 [[ "$edge_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${edge_port}\"}"* ]] \
   || fail "Funnel smoke edge must publish only its loopback port"
+edge_effective_port_bindings="$(docker inspect "$edge_container" --format '{{json .NetworkSettings.Ports}}')"
+[[ "$edge_effective_port_bindings" == *"\"8080/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"${edge_port}\"}"* ]] \
+  || fail "Funnel smoke edge loopback port must be effective"
+[[ "$(docker port "$edge_container" 8080/tcp 2>/dev/null || true)" == "127.0.0.1:${edge_port}" ]] \
+  || fail "Funnel smoke edge must expose exactly one effective loopback port"
 wait_for_relay_ready
 relay_internal_status /healthz
 wait_for_edge_ready

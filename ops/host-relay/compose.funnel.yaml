@@ -78,8 +78,22 @@ services:
         bind:
           create_host_path: false
     networks:
-      - relay
+      loopback:
+        # The edge, not Relay, must use the non-internal network as its
+        # default gateway for Docker to install the loopback port mapping.
+        gw_priority: 1
+      relay:
+        gw_priority: 0
 
 networks:
   relay:
     internal: true
+  # Docker cannot publish a host port from an internal-only network. This
+  # private project bridge exists only for the loopback host binding; it has no
+  # published container ports other than 127.0.0.1:${FNS_RELAY_FUNNEL_EDGE_PORT}.
+  loopback:
+    driver: bridge
+    driver_opts:
+      # Defense in depth: retain loopback as the default even if a future port
+      # mapping accidentally omits its explicit host address.
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"

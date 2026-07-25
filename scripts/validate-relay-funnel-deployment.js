@@ -32,6 +32,14 @@ if (relayService === "" || edgeService === "" || composeNetworks === "")
 if (relayService.includes("ports:")) failures.push(`${composePath} must keep Relay off host ports`);
 if (relayService.includes("- public") || edgeService.includes("- public"))
   failures.push(`${composePath} must not create a public Docker network`);
+if (relayService.includes("loopback:")) failures.push(`${composePath} must keep Relay off the loopback bridge`);
+if (!edgeService.includes("loopback:") || !edgeService.includes("relay:"))
+  failures.push(`${composePath} must attach the Funnel edge to the loopback and private networks`);
+if (
+  !/loopback:\n(?:\s*#.*\n)*\s*gw_priority: 1/.test(edgeService) ||
+  !edgeService.includes("relay:\n        gw_priority: 0")
+)
+  failures.push(`${composePath} must make the edge loopback bridge its default gateway`);
 if (!edgeService.includes('"${FNS_RELAY_FUNNEL_EDGE_BIND:-127.0.0.1}:${FNS_RELAY_FUNNEL_EDGE_PORT:-18080}:8080"'))
   failures.push(`${composePath} must publish only the configurable loopback Funnel edge port`);
 for (const forbidden of [
@@ -49,7 +57,9 @@ for (const expected of [
   "read_only: true",
   "create_host_path: false",
   "no-new-privileges:true",
-  "relay:\n    internal: true"
+  "relay:\n    internal: true",
+  "loopback:\n    driver: bridge",
+  'com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"'
 ])
   requireText(composePath, compose, expected);
 for (const expected of [
@@ -126,6 +136,8 @@ for (const expected of [
   "funnel-proxy-client.js",
   "--network host",
   "HostConfig.PortBindings",
+  "NetworkSettings.Ports",
+  "docker port",
   "proxyProtocol",
   "relay:publication:create",
   "nextCursor",
