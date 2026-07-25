@@ -229,8 +229,8 @@ compose_started=true
   || fail "smoke Relay is not configured to run as UID/GID 10001"
 [[ "$(docker inspect "$relay_container" --format '{{.HostConfig.ReadonlyRootfs}}')" == "true" ]] \
   || fail "smoke Relay root filesystem is not read-only"
-curl --fail --silent --show-error --noproxy 127.0.0.1 --output /dev/null "http://127.0.0.1:${probe_port}/healthz"
 wait_for_direct_ready
+curl --fail --silent --show-error --noproxy 127.0.0.1 --output /dev/null "http://127.0.0.1:${probe_port}/healthz"
 [[ "$(edge_status /healthz "${responses_directory}/edge-health.json")" == "404" ]] || fail "edge must not expose /healthz"
 [[ "$(edge_status /readyz "${responses_directory}/edge-ready.json")" == "404" ]] || fail "edge must not expose /readyz"
 
