@@ -146,11 +146,23 @@ wait_for_relay_ready() {
 
 edge_status() {
   local pathname="$1" output="$2"
-  curl --silent --show-error --insecure --noproxy "$smoke_domain" \
+  curl --silent --show-error --insecure --noproxy '*' \
     --resolve "${smoke_domain}:${https_port}:127.0.0.1" \
     --output "$output" \
     --write-out '%{http_code}' \
     "https://${smoke_domain}:${https_port}${pathname}"
+}
+
+wait_for_edge_ready() {
+  local deadline="$(($(date +%s) + 60))"
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    if [[ "$(edge_status /healthz "${responses_directory}/edge-wait.json" 2>/dev/null || true)" == "404" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  docker logs --tail 100 "$edge_container" >&2 || true
+  fail "smoke edge did not become ready"
 }
 
 admin_capability() {
@@ -254,6 +266,7 @@ relay_published_ports="$(docker port "$relay_container" 8080/tcp 2>/dev/null || 
 [[ -z "$relay_published_ports" ]] || fail "smoke Relay must not publish port 8080 to the host"
 wait_for_relay_ready
 relay_internal_status /healthz
+wait_for_edge_ready
 [[ "$(edge_status /healthz "${responses_directory}/edge-health.json")" == "404" ]] || fail "edge must not expose /healthz"
 [[ "$(edge_status /readyz "${responses_directory}/edge-ready.json")" == "404" ]] || fail "edge must not expose /readyz"
 
@@ -274,7 +287,7 @@ printf '{"objectId":"%s","object":{"payload":{"type":"fns.alias.bind","context":
 printf '{"objectId":"%s","object":{"payload":{"type":"fns.alias.bind","context":"%s","alias":"%s"}}}\n' \
   "$binding_b" "$context_id" "$alias" >"${responses_directory}/publish-b.json"
 for request_file in "${responses_directory}/publish-a.json" "${responses_directory}/publish-b.json"; do
-  status="$(curl --silent --show-error --insecure --noproxy "$smoke_domain" \
+  status="$(curl --silent --show-error --insecure --noproxy '*' \
     --resolve "${smoke_domain}:${https_port}:127.0.0.1" \
     --config "$curl_configuration" \
     --header 'Content-Type: application/json' \
