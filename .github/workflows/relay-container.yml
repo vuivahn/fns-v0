@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Use a real public commit, not GitHub's synthetic pull-request merge
           # commit, because the source-offer smoke resolves its immutable archive.
@@ -54,7 +54,7 @@ jobs:
       FNS_RELAY_EDGE_HTTPS_PORT: "443"
       FNS_RELAY_SMOKE_CONFIRM: I_UNDERSTAND_THIS_IS_NONPRODUCTION
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Configure disposable host paths
