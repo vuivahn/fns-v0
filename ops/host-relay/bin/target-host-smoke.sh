@@ -220,7 +220,7 @@ install --mode 0600 "${FNS_RELAY_EVIDENCE_DIR}/current-image-build.json" "${smok
 } >"$environment_file"
 chmod 0600 "$environment_file"
 
-"${script_directory}/verify-image.sh"
+bash "${script_directory}/verify-image.sh"
 [[ "$(docker image inspect "$FNS_RELAY_IMAGE" --format '{{.Architecture}}')" == "amd64" ]] \
   || fail "target-host smoke currently requires a linux/amd64 Relay image"
 smoke_compose --profile edge up --detach
@@ -292,7 +292,7 @@ env \
   "FNS_RELAY_VERIFIED_ARCHIVE_DIR=${verified_archive_directory}" \
   "FNS_RELAY_EVIDENCE_DIR=${smoke_evidence_directory}" \
   "FNS_RELAY_DRILL_ROOT=${drill_root}" \
-  "${script_directory}/archive.sh" >/dev/null
+  bash "${script_directory}/archive.sh" >/dev/null
 smoke_manifest="$(find "$verified_archive_directory" -maxdepth 1 -type f -name 'relay-*.manifest.json' -printf '%T@ %p\n' | sort --numeric-sort --reverse | head --lines 1 | cut --delimiter=' ' --fields=2-)"
 [[ -n "$smoke_manifest" ]] || fail "smoke archive did not create a verified manifest"
 smoke_archive_name="$(archive_name_from_manifest "$smoke_manifest")"

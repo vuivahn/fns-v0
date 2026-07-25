@@ -53,7 +53,13 @@ if ((edge.match(/access_log \/dev\/stdout fns_relay;/g) ?? []).length !== 2)
   failures.push("both edge servers must use the redacted access log format");
 
 const archive = read("ops/host-relay/bin/archive.sh");
-for (const expected of ["--network none", "verify-archive", "admin.js export", "admin.js verify"])
+for (const expected of [
+  "--network none",
+  "verify-archive",
+  "admin.js export",
+  "admin.js verify",
+  'bash "${script_directory}/verify-image.sh"'
+])
   requireText("ops/host-relay/bin/archive.sh", archive, expected);
 if (archive.includes("CAPABILITY_DIR") || archive.includes("SECRETS_DIR"))
   failures.push("archive job must not mount capability storage or Relay secrets");
@@ -121,7 +127,9 @@ for (const expected of [
   "smoke_compose stop",
   "archive.sh",
   "restore-replace",
-  "bad-permissions"
+  "bad-permissions",
+  'bash "${script_directory}/verify-image.sh"',
+  'bash "${script_directory}/archive.sh"'
 ])
   requireText("ops/host-relay/bin/target-host-smoke.sh", hostSmoke, expected);
 
