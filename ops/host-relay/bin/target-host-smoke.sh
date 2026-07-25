@@ -146,7 +146,7 @@ wait_for_relay_ready() {
 
 edge_status() {
   local pathname="$1" output="$2"
-  curl --silent --show-error --insecure --noproxy '*' \
+  curl --silent --show-error --insecure --connect-timeout 2 --max-time 5 --noproxy '*' \
     --resolve "${smoke_domain}:${https_port}:127.0.0.1" \
     --output "$output" \
     --write-out '%{http_code}' \
@@ -161,6 +161,7 @@ wait_for_edge_ready() {
     fi
     sleep 1
   done
+  docker inspect --format '{{json .State}}' "$edge_container" >&2 || true
   docker logs --tail 100 "$edge_container" >&2 || true
   fail "smoke edge did not become ready"
 }
