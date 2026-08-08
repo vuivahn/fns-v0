@@ -37,7 +37,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "better-sqlite3": "13.0.1",
+    "better-sqlite3": "13.0.3",
     "fns-v0-validator": "0.11.0"
   },
   "repository": {
